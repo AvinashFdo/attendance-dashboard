@@ -1,0 +1,97 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Student {
+  id      String @id @default(cuid())
+  email   String @unique
+  name    String?
+  program String? // keep as-is (student’s main program if you have it)
+
+  enrollments Enrollment[]
+  attendance  Attendance[]
+}
+
+model Program {
+  id    String @id @default(cuid())
+  name  String @unique
+
+  modules ProgramModule[]
+}
+
+model Module {
+  code String @id
+  name String
+
+  programs    ProgramModule[]
+  enrollments Enrollment[]
+  sessions    Session[]
+}
+
+model ProgramModule {
+  id         String @id @default(cuid())
+  programId  String
+  moduleCode String
+
+  program Program @relation(fields: [programId], references: [id], onDelete: Cascade)
+  module  Module  @relation(fields: [moduleCode], references: [code], onDelete: Cascade)
+
+  @@unique([programId, moduleCode])
+  @@index([moduleCode])
+  @@index([programId])
+}
+
+model Enrollment {
+  id         String @id @default(cuid())
+  studentId  String
+  moduleCode String
+
+  intake String
+  year   Int
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  module  Module  @relation(fields: [moduleCode], references: [code], onDelete: Cascade)
+
+  @@unique([studentId, moduleCode, intake, year], name: "studentId_moduleCode_intake_year")
+}
+
+model Session {
+  id         String @id @default(cuid())
+  sessionKey String @unique
+
+  moduleCode String
+  intake     String
+  year       Int
+
+  meetingName String?
+  startTime   DateTime?
+  endTime     DateTime?
+  durationMin Int?
+
+  module     Module       @relation(fields: [moduleCode], references: [code], onDelete: Cascade)
+  attendance Attendance[]
+
+  @@index([moduleCode, intake, year])
+}
+
+model Attendance {
+  id         String @id @default(cuid())
+  sessionId  String
+  studentId  String
+  emailRaw   String?
+  firstJoin  DateTime?
+  lastLeave  DateTime?
+  minutes    Int?
+  role       String?
+  isEligible Boolean @default(false)
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, studentId])
+}
