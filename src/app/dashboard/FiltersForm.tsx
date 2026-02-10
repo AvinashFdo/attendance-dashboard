@@ -53,19 +53,33 @@ export default function FiltersForm(props: {
     [router, props.q, props.student, props.intake, props.year]
   );
 
+  const labelCls = "block text-sm font-medium text-slate-700 mb-1";
+  const selectCls =
+    "w-full h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm " +
+    "focus:outline-none focus:ring-2 focus:ring-slate-300";
+  const inputCls =
+    "w-full h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm " +
+    "placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300";
+  const primaryBtnCls =
+    "h-10 rounded-xl bg-slate-900 px-4 text-sm font-medium text-white shadow-sm " +
+    "hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300";
+  const secondaryBtnCls =
+    "h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-900 shadow-sm " +
+    "hover:bg-slate-50 hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-slate-300";
+
   return (
-    <div className="rounded-xl border p-4 space-y-4">
-      <form className="grid grid-cols-2 gap-3" action="/dashboard" method="get">
+    <div className="rounded-2xl border border-slate-200 bg-slate-50/40 p-4 md:p-5">
+      <form className="grid grid-cols-1 md:grid-cols-2 gap-4" action="/dashboard#cohort" method="get">
         <input type="hidden" name="q" value={props.q} />
         <input type="hidden" name="student" value={props.student} />
 
         <div>
-          <label className="block text-sm font-medium mb-1">Program</label>
+          <label className={labelCls}>Program</label>
           <select
             name="program"
             value={props.programId}
             onChange={(e) => onProgramChange(e.target.value)}
-            className="w-full rounded-lg border px-3 py-2"
+            className={selectCls}
           >
             <option value="">All programs</option>
             {props.programs.map((p) => (
@@ -74,18 +88,11 @@ export default function FiltersForm(props: {
               </option>
             ))}
           </select>
-          {/*<div className="text-xs text-gray-500 mt-1">
-            Changing Program updates the module list automatically.
-          </div>*/}
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-1">Module</label>
-          <select
-            name="module"
-            defaultValue={props.moduleFilter}
-            className="w-full rounded-lg border px-3 py-2"
-          >
+          <label className={labelCls}>Module</label>
+          <select name="module" defaultValue={props.moduleFilter} className={selectCls}>
             <option value="">All modules</option>
             {props.moduleOptions.map((m) => (
               <option key={m.code} value={m.code}>
@@ -94,18 +101,17 @@ export default function FiltersForm(props: {
               </option>
             ))}
           </select>
+
           {props.programId && props.moduleOptions.length === 0 && (
-            <div className="text-xs text-gray-600 mt-1">No modules found for this program.</div>
+            <div className="mt-2 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2">
+              No modules found for this program.
+            </div>
           )}
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-1">Intake</label>
-          <select
-            name="intake"
-            defaultValue={props.intake}
-            className="w-full rounded-lg border px-3 py-2"
-          >
+          <label className={labelCls}>Intake</label>
+          <select name="intake" defaultValue={props.intake} className={selectCls}>
             <option value="">All intakes</option>
             <option value="Spring">Spring</option>
             <option value="Summer">Summer</option>
@@ -114,7 +120,7 @@ export default function FiltersForm(props: {
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-1">Year</label>
+          <label className={labelCls}>Year</label>
           <input
             name="year"
             type="number"
@@ -122,20 +128,23 @@ export default function FiltersForm(props: {
             max={2100}
             defaultValue={props.year}
             placeholder="All years"
-            className="w-full rounded-lg border px-3 py-2"
+            className={inputCls}
           />
         </div>
 
-        <div className="col-span-2 flex gap-2">
-          <button className="rounded-lg border px-4 py-2">Apply filters</button>
-          <a className="rounded-lg border px-4 py-2 text-center" href="/dashboard">
+        <div className="md:col-span-2 flex flex-col sm:flex-row gap-2 sm:items-center">
+          <button type="submit" className={primaryBtnCls}>
+            Apply filters
+          </button>
+
+          <a className={`${secondaryBtnCls} inline-flex items-center justify-center`} href="/dashboard">
             Clear
           </a>
         </div>
 
         {!props.cohortSelected && (props.programId || props.moduleFilter || props.intake || props.year) && (
-          <div className="col-span-2 text-xs text-gray-600">
-            Tip: Select <b>Module + Intake + Year</b> to see the full cohort summary list.
+          <div className="md:col-span-2 text-xs text-slate-600">
+            Tip: Select <span className="font-semibold">Module + Intake + Year</span> to see the full cohort summary list.
           </div>
         )}
       </form>

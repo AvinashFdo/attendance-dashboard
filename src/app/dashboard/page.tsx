@@ -19,6 +19,16 @@ function pct(n: number, d: number) {
   return Math.round((n / d) * 1000) / 10; // 1 decimal
 }
 
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function fmtPct1(value: number | null) {
+  if (value == null || !Number.isFinite(value)) return "-";
+  const v = Math.round(value * 10) / 10;
+  return `${v}%`;
+}
+
 function fmtDate(d: Date | null) {
   if (!d) return "-";
   return new Intl.DateTimeFormat("en-GB", {
@@ -75,6 +85,35 @@ function buildDashboardUrl(params: {
   year: string;
 }) {
   return `/dashboard?${new URLSearchParams(params).toString()}`;
+}
+
+type RiskLevel = "No data" | "High" | "Medium" | "Low";
+
+function calcRiskLevel(sessionPct: number | null, timePct: number | null): RiskLevel {
+  // If we have no usable metric (e.g., no sessions held), show No data
+  if (sessionPct == null && timePct == null) return "No data";
+
+  const s = sessionPct;
+  const t = timePct;
+
+  // High risk if either metric is under 50%
+  if ((s != null && s < 50) || (t != null && t < 50)) return "High";
+
+  // Low risk only if BOTH are >= 75% (when available)
+  // If one metric is missing, we can’t confidently label Low → keep Medium.
+  if (s != null && t != null && s >= 75 && t >= 75) return "Low";
+
+  return "Medium";
+}
+
+function riskBadgeClasses(level: RiskLevel) {
+  if (level === "High")
+    return "bg-rose-50 text-rose-700 ring-1 ring-rose-200";
+  if (level === "Low")
+    return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200";
+  if (level === "Medium")
+    return "bg-amber-50 text-amber-800 ring-1 ring-amber-200";
+  return "bg-slate-50 text-slate-700 ring-1 ring-slate-200";
 }
 
 export default async function DashboardPage({
@@ -323,6 +362,12 @@ export default async function DashboardPage({
     sessionsAttended: 0,
   };
 
+  // NEW: time-based totals (only sessions with known duration contribute)
+  const timeTotals = {
+    durationKnownMin: 0,
+    attendedMin: 0,
+  };
+
   const sessionsByCohort = new Map<
     string,
     Array<{
@@ -332,6 +377,7 @@ export default async function DashboardPage({
       durationMin: number | null;
       attended: boolean;
       attendedMin: number;
+      attendedPct: number | null; // NEW
     }>
   >();
 
@@ -424,13 +470,29 @@ export default async function DashboardPage({
 
         if (a) attendedCountMap.set(key, (attendedCountMap.get(key) ?? 0) + 1);
 
+        const attendedMin = a?.minutes ?? 0;
+
+        // NEW: per-session attended % (only if attended & duration known)
+        const dur = typeof s.durationMin === "number" && s.durationMin > 0 ? s.durationMin : null;
+        const attendedPct =
+          a && dur
+            ? clamp((attendedMin / dur) * 100, 0, 100)
+            : null;
+
+        // NEW: overall time totals (only sessions with known duration)
+        if (dur) {
+          timeTotals.durationKnownMin += dur;
+          if (a) timeTotals.attendedMin += clamp(attendedMin, 0, dur);
+        }
+
         const row = {
           id: s.id,
           meetingName: s.meetingName,
           startTime: s.startTime,
           durationMin: s.durationMin,
           attended: !!a,
-          attendedMin: a?.minutes ?? 0,
+          attendedMin,
+          attendedPct,
         };
 
         const list = sessionsByCohort.get(key) ?? [];
@@ -466,18 +528,43 @@ export default async function DashboardPage({
     }
   }
 
+  // NEW: KPIs for selected student
+  const sessionsPct = selected && totals.sessionsHeld > 0
+    ? pct(totals.sessionsAttended, totals.sessionsHeld)
+    : null;
+
+  const timePct = selected && timeTotals.durationKnownMin > 0
+    ? pct(timeTotals.attendedMin, timeTotals.durationKnownMin)
+    : null;
+
+  const riskLevel = selected ? calcRiskLevel(sessionsPct, timePct) : "No data";
+
   return (
     <div className="min-h-screen bg-slate-50">
       <div className="mx-auto w-full max-w-6xl px-4 py-6 md:px-6 md:py-10 space-y-6">
         {/* Page header */}
-        <header className="space-y-1">
-          <h1 className="text-2xl md:text-3xl font-semibold tracking-tight text-slate-900">
-            Attendance Dashboard
-          </h1>
-          <p className="text-sm text-slate-600">
-            Search students and review cohort / student attendance summaries.
-          </p>
+        <header className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+          <div className="space-y-1">
+            <h1 className="text-2xl md:text-3xl font-semibold tracking-tight text-slate-900">
+              Attendance Dashboard
+            </h1>
+            <p className="text-sm text-slate-600">
+              Search students and review cohort / student attendance summaries.
+            </p>
+          </div>
+
+          {/* Import page link */}
+          <a
+            href="/import"
+            className="inline-flex items-center gap-2 h-10 rounded-xl border border-slate-200
+                      bg-white px-4 text-sm font-medium text-slate-900 shadow-sm
+                      hover:bg-slate-50 hover:border-slate-300
+                      focus:outline-none focus:ring-2 focus:ring-slate-300"
+          >
+            Import data
+          </a>
         </header>
+
 
         {/* Filters block (client) */}
         <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -513,11 +600,16 @@ export default async function DashboardPage({
             <div className="space-y-1">
               <h2 className="text-base font-semibold text-slate-900">Student Search</h2>
               <p className="text-sm text-slate-600">
-                Search by name or email (only <span className="font-medium">@stu.nexteducationgroup.com</span> will appear).
+                Search by name or email (only{" "}
+                <span className="font-medium">@stu.nexteducationgroup.com</span> will appear).
               </p>
             </div>
 
-            <form className="flex flex-col gap-2 sm:flex-row sm:items-center" action="/dashboard" method="get">
+            <form
+              className="flex flex-col gap-2 sm:flex-row sm:items-center"
+              action="/dashboard#matches"
+              method="get"
+            >
               <input type="hidden" name="program" value={programId} />
               <input type="hidden" name="module" value={moduleFilter} />
               <input type="hidden" name="intake" value={intake} />
@@ -548,7 +640,7 @@ export default async function DashboardPage({
             )}
 
             {students.length > 0 && (
-              <div className="pt-2">
+              <div id="matches" className="pt-2 scroll-mt-6">
                 <div className="flex items-center justify-between">
                   <div className="text-sm font-medium text-slate-900">Matches</div>
                   <div className="text-xs text-slate-500">{students.length} shown</div>
@@ -567,7 +659,8 @@ export default async function DashboardPage({
                         module: moduleFilter,
                         intake,
                         year: year ? String(year) : "",
-                      })}
+                      })+ "#student"
+                    }
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
@@ -596,7 +689,10 @@ export default async function DashboardPage({
 
         {/* Cohort Summary */}
         {cohortSummary && (
-          <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <section
+            id="cohort"
+            className="rounded-2xl border border-slate-200 bg-white shadow-sm scroll-mt-6"
+          >
             <div className="p-4 md:p-6 space-y-5">
               <div className="space-y-1">
                 <h2 className="text-base md:text-lg font-semibold text-slate-900">
@@ -647,14 +743,16 @@ export default async function DashboardPage({
                         <td className="py-3 px-4">
                           <a
                             className="font-medium text-slate-900 hover:underline"
-                            href={buildDashboardUrl({
-                              q,
-                              student: r.studentId,
-                              program: programId,
-                              module: moduleFilter,
-                              intake,
-                              year: year ? String(year) : "",
-                            })}
+                            href={
+                              buildDashboardUrl({
+                                q,
+                                student: r.studentId,
+                                program: programId,
+                                module: moduleFilter,
+                                intake,
+                                year: year ? String(year) : "",
+                              }) + "#student"
+                            }
                           >
                             {r.name ?? "(no name)"}
                           </a>
@@ -694,7 +792,10 @@ export default async function DashboardPage({
 
         {/* Selected student summary */}
         {selected && (
-          <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <section
+            id="student"
+            className="rounded-2xl border border-slate-200 bg-white shadow-sm scroll-mt-6"
+          >
             <div className="p-4 md:p-6 space-y-5">
               <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                 <div className="space-y-1 min-w-0">
@@ -704,24 +805,55 @@ export default async function DashboardPage({
                   <div className="text-sm text-slate-600 truncate">{selected.email}</div>
                   {selected.program && (
                     <div className="text-sm text-slate-600">
-                      Program: <span className="font-medium text-slate-900">{selected.program}</span>
+                      Program:{" "}
+                      <span className="font-medium text-slate-900">{selected.program}</span>
                     </div>
                   )}
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* KPIs (now 4 cards) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
                   <div className="text-xs uppercase tracking-wide text-slate-500">Attendance</div>
                   <div className="mt-1 text-2xl font-semibold text-slate-900">
                     {pct(totals.sessionsAttended, totals.sessionsHeld)}%
                   </div>
+                  <div className="mt-1 text-xs text-slate-500">By sessions</div>
                 </div>
+
                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
                   <div className="text-xs uppercase tracking-wide text-slate-500">Sessions attended</div>
                   <div className="mt-1 text-2xl font-semibold text-slate-900 tabular-nums">
-                    {totals.sessionsAttended}{" "}
-                    / {totals.sessionsHeld}
+                    {totals.sessionsAttended} / {totals.sessionsHeld}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <div className="text-xs uppercase tracking-wide text-slate-500">Time attended</div>
+                  <div className="mt-1 text-2xl font-semibold text-slate-900">
+                    {timePct == null ? "-" : `${timePct}%`}
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    {timeTotals.durationKnownMin > 0
+                      ? `${fmtMinutes(timeTotals.attendedMin)} / ${fmtMinutes(timeTotals.durationKnownMin)}`
+                      : "No duration data yet"}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <div className="text-xs uppercase tracking-wide text-slate-500">Risk level</div>
+                  <div className="mt-2">
+                    <span
+                      className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold ${riskBadgeClasses(
+                        riskLevel
+                      )}`}
+                    >
+                      {riskLevel}
+                    </span>
+                  </div>
+                  <div className="mt-2 text-xs text-slate-500">
+                    High: &lt;50% • Low: ≥75% (sessions + time)
                   </div>
                 </div>
               </div>
@@ -777,7 +909,8 @@ export default async function DashboardPage({
 
                           <tr className="border-b border-slate-200 bg-white">
                             <td colSpan={8} className="px-4 py-3">
-                              <details className="rounded-2xl border border-slate-200 bg-white">
+                              {/* NOTE: add group here so the chevron rotate works */}
+                              <details className="group rounded-2xl border border-slate-200 bg-white">
                                 <summary className="cursor-pointer px-4 py-3 select-none flex items-center justify-between gap-3 list-none">
                                   <div className="flex items-center gap-2">
                                     <span className="font-medium text-slate-900">Sessions</span>
@@ -803,27 +936,34 @@ export default async function DashboardPage({
                                     <table className="w-full text-sm">
                                       <thead className="bg-slate-50 text-slate-600">
                                         <tr className="border-b border-slate-200">
-                                          <th className="py-3 px-4 text-left font-medium">Date</th>
+                                          <th className="py-3 px-4 text-left font-medium whitespace-nowrap">Date</th>
                                           <th className="py-3 px-4 text-left font-medium">Meeting title</th>
-                                          <th className="py-3 px-4 text-left font-medium">Status</th>
-                                          <th className="py-3 px-4 text-right font-medium">Meeting duration</th>
-                                          <th className="py-3 px-4 text-right font-medium">Attended</th>
+                                          <th className="py-3 px-4 text-left font-medium whitespace-nowrap">Status</th>
+                                          <th className="py-3 px-4 text-right font-medium whitespace-nowrap">Meeting duration</th>
+                                          <th className="py-3 px-4 text-right font-medium whitespace-nowrap">Attended</th>
+                                          <th className="py-3 px-4 text-right font-medium whitespace-nowrap">% attended</th>
                                         </tr>
                                       </thead>
+
                                       <tbody>
                                         {sessionRows.map((s, sidx) => (
                                           <tr
                                             key={s.id}
                                             className={`border-b border-slate-100 ${
                                               sidx % 2 === 0 ? "bg-white" : "bg-slate-50/50"
-                                            }`}
+                                            } hover:bg-slate-50`}
                                           >
                                             <td className="py-3 px-4 whitespace-nowrap text-slate-900">
                                               {fmtDate(s.startTime)}
                                             </td>
+
+                                            {/* ✅ Limit title width so the right-side columns sit closer */}
                                             <td className="py-3 px-4 text-slate-900">
-                                              {s.meetingName ?? "-"}
+                                              <div className="max-w-[520px] leading-snug">
+                                                {s.meetingName ?? "-"}
+                                              </div>
                                             </td>
+
                                             <td className="py-3 px-4 whitespace-nowrap">
                                               {s.attended ? (
                                                 <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 ring-1 ring-emerald-200">
@@ -835,18 +975,24 @@ export default async function DashboardPage({
                                                 </span>
                                               )}
                                             </td>
+
                                             <td className="py-3 px-4 text-right tabular-nums text-slate-700 whitespace-nowrap">
                                               {fmtMinutes(s.durationMin)}
                                             </td>
+
                                             <td className="py-3 px-4 text-right tabular-nums text-slate-700 whitespace-nowrap">
                                               {s.attended ? fmtMinutes(s.attendedMin) : "-"}
+                                            </td>
+
+                                            <td className="py-3 px-4 text-right tabular-nums text-slate-700 whitespace-nowrap">
+                                              {s.attendedPct == null ? "-" : fmtPct1(s.attendedPct)}
                                             </td>
                                           </tr>
                                         ))}
 
                                         {sessionRows.length === 0 && (
                                           <tr>
-                                            <td className="py-4 px-4 text-slate-600" colSpan={5}>
+                                            <td className="py-4 px-4 text-slate-600" colSpan={6}>
                                               No sessions found for this cohort yet.
                                             </td>
                                           </tr>

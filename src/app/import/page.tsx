@@ -357,13 +357,24 @@ export default function ImportPage() {
   <div className="min-h-screen bg-slate-50">
     <div className="mx-auto w-full max-w-3xl px-4 py-6 md:px-6 md:py-10 space-y-6">
       {/* Header */}
-      <header className="space-y-1">
-        <h1 className="text-2xl md:text-3xl font-semibold tracking-tight text-slate-900">
+      <header className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+        <div className="space-y-1">
+          <h1 className="text-2xl md:text-3xl font-semibold tracking-tight text-slate-900">
           Import Data
-        </h1>
-        <p className="text-sm text-slate-600">
-          Upload Teams attendance regularly. Module master & enrollment only when needed.
-        </p>
+          </h1>
+          <p className="text-sm text-slate-600">
+            Upload Teams attendance regularly. Module master & enrollment only when needed.
+          </p>
+        </div>
+        <a
+            href="/dashboard"
+            className="inline-flex items-center gap-2 h-10 rounded-xl border border-slate-200
+                      bg-white px-4 text-sm font-medium text-slate-900 shadow-sm
+                      hover:bg-slate-50 hover:border-slate-300
+                      focus:outline-none focus:ring-2 focus:ring-slate-300"
+          >
+            Dashboard
+          </a>
       </header>
 
       {/* Status message */}
@@ -477,7 +488,7 @@ export default function ImportPage() {
                   >
                     {filteredModules.map((m) => (
                       <option key={m.code} value={m.code}>
-                        {m.code} — {m.name}
+                        {m.code} - {m.name}
                       </option>
                     ))}
                   </select>
