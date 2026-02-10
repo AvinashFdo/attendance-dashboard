@@ -355,7 +355,7 @@ export default function ImportPage() {
 
   return (
   <div className="min-h-screen bg-slate-50">
-    <div className="mx-auto w-full max-w-3xl px-4 py-6 md:px-6 md:py-10 space-y-6">
+    <div className="mx-auto w-full max-w-6xl px-4 py-6 md:px-6 md:py-10 space-y-6">
       {/* Header */}
       <header className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
         <div className="space-y-1">
