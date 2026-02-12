@@ -803,10 +803,12 @@ export default async function DashboardPage({
                     {selected.name ?? "(no name)"}
                   </h2>
                   <div className="text-sm text-slate-600 truncate">{selected.email}</div>
-                  {selected.program && (
+                  {moduleRows.length > 0 && (
                     <div className="text-sm text-slate-600">
                       Program:{" "}
-                      <span className="font-medium text-slate-900">{selected.program}</span>
+                      <span className="font-medium text-slate-900">
+                        {moduleRows[0].programsText ?? "-"}
+                      </span>
                     </div>
                   )}
                 </div>
