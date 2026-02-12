@@ -610,10 +610,12 @@ export default async function DashboardPage({
               action="/dashboard#matches"
               method="get"
             >
-              <input type="hidden" name="program" value={programId} />
-              <input type="hidden" name="module" value={moduleFilter} />
-              <input type="hidden" name="intake" value={intake} />
-              <input type="hidden" name="year" value={year ? String(year) : ""} />
+              {/* Clear filters + selected student on new search */}
+              <input type="hidden" name="program" value="" />
+              <input type="hidden" name="module" value="" />
+              <input type="hidden" name="intake" value="" />
+              <input type="hidden" name="year" value="" />
+              <input type="hidden" name="student" value="" />
 
               <div className="flex-1">
                 <input
@@ -621,13 +623,13 @@ export default async function DashboardPage({
                   defaultValue={q}
                   placeholder="e.g. John Doe or john@stu.nexteducationgroup.com"
                   className="w-full h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm
-                             placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                            placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300"
                 />
               </div>
 
               <button
                 className="h-10 rounded-xl border border-slate-200 bg-slate-900 px-4 text-sm font-medium text-white
-                           shadow-sm hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                          shadow-sm hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
               >
                 Search
               </button>
