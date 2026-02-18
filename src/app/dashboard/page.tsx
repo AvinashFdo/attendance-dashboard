@@ -1,6 +1,6 @@
 import React from "react";
 import { prisma } from "@/lib/prisma";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import FiltersForm from "./FiltersForm";
 
 type SearchParams = {
@@ -90,29 +90,22 @@ function buildDashboardUrl(params: {
 type RiskLevel = "No data" | "High" | "Medium" | "Low";
 
 function calcRiskLevel(sessionPct: number | null, timePct: number | null): RiskLevel {
-  // If we have no usable metric (e.g., no sessions held), show No data
   if (sessionPct == null && timePct == null) return "No data";
 
   const s = sessionPct;
   const t = timePct;
 
-  // High risk if either metric is under 50%
   if ((s != null && s < 50) || (t != null && t < 50)) return "High";
 
-  // Low risk only if BOTH are >= 75% (when available)
-  // If one metric is missing, we can’t confidently label Low → keep Medium.
   if (s != null && t != null && s >= 75 && t >= 75) return "Low";
 
   return "Medium";
 }
 
 function riskBadgeClasses(level: RiskLevel) {
-  if (level === "High")
-    return "bg-rose-50 text-rose-700 ring-1 ring-rose-200";
-  if (level === "Low")
-    return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200";
-  if (level === "Medium")
-    return "bg-amber-50 text-amber-800 ring-1 ring-amber-200";
+  if (level === "High") return "bg-rose-50 text-rose-700 ring-1 ring-rose-200";
+  if (level === "Low") return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200";
+  if (level === "Medium") return "bg-amber-50 text-amber-800 ring-1 ring-amber-200";
   return "bg-slate-50 text-slate-700 ring-1 ring-slate-200";
 }
 
@@ -135,13 +128,11 @@ export default async function DashboardPage({
 
   const cohortSelected = !!(moduleFilter && intake && year);
 
-  // Programs dropdown
   const programs: ProgramOption[] = await prisma.program.findMany({
     orderBy: { name: "asc" },
     select: { id: true, name: true },
   });
 
-  // ✅ Modules dropdown depends on Program filter (SERVER SIDE, based on URL param)
   const modulesForDropdown = await prisma.module.findMany({
     where: programId
       ? {
@@ -160,9 +151,10 @@ export default async function DashboardPage({
 
   const moduleOptions: ModuleOption[] = modulesForDropdown.map((m) => {
     const progNames = m.programs
-      .map((x) => x.program.name)
-      .filter((n) => typeof n === "string" && n.length > 0)
-      .sort((a, b) => a.localeCompare(b));
+      .map((x: { program: { name: string } }) => x.program.name)
+      .filter((n: string) => typeof n === "string" && n.length > 0)
+      .sort((a: string, b: string) => a.localeCompare(b));
+
     return {
       code: m.code,
       name: m.name,
@@ -170,10 +162,6 @@ export default async function DashboardPage({
     };
   });
 
-  // -----------------------------
-  // Option A: Search matches are FILTER-AWARE
-  // Only show students (@stu...) who match the selected filter(s)
-  // -----------------------------
   const studentSearchWhere: Prisma.StudentWhereInput | null =
     q.length >= 2
       ? {
@@ -225,10 +213,6 @@ export default async function DashboardPage({
       })
     : null;
 
-  // -----------------------------
-  // Cohort summary (CEO):
-  // if module+intake+year => show cohort list
-  // -----------------------------
   let cohortSummary:
     | {
         moduleCode: string;
@@ -260,9 +244,9 @@ export default async function DashboardPage({
 
     const programsText = moduleMeta
       ? moduleMeta.programs
-          .map((x) => x.program.name)
-          .filter((n) => typeof n === "string" && n.length > 0)
-          .sort((a, b) => a.localeCompare(b))
+          .map((x: { program: { name: string } }) => x.program.name)
+          .filter((n: string) => typeof n === "string" && n.length > 0)
+          .sort((a: string, b: string) => a.localeCompare(b))
           .join(", ")
       : "";
 
@@ -343,9 +327,6 @@ export default async function DashboardPage({
     };
   }
 
-  // -----------------------------
-  // Selected student details (cohort-aware)
-  // -----------------------------
   let moduleRows: Array<{
     moduleCode: string;
     moduleName: string;
@@ -357,16 +338,9 @@ export default async function DashboardPage({
     attendancePct: number;
   }> = [];
 
-  const totals = {
-    sessionsHeld: 0,
-    sessionsAttended: 0,
-  };
+  const totals = { sessionsHeld: 0, sessionsAttended: 0 };
 
-  // NEW: time-based totals (only sessions with known duration contribute)
-  const timeTotals = {
-    durationKnownMin: 0,
-    attendedMin: 0,
-  };
+  const timeTotals = { durationKnownMin: 0, attendedMin: 0 };
 
   const sessionsByCohort = new Map<
     string,
@@ -377,7 +351,7 @@ export default async function DashboardPage({
       durationMin: number | null;
       attended: boolean;
       attendedMin: number;
-      attendedPct: number | null; // NEW
+      attendedPct: number | null;
     }>
   >();
 
@@ -472,14 +446,9 @@ export default async function DashboardPage({
 
         const attendedMin = a?.minutes ?? 0;
 
-        // NEW: per-session attended % (only if attended & duration known)
         const dur = typeof s.durationMin === "number" && s.durationMin > 0 ? s.durationMin : null;
-        const attendedPct =
-          a && dur
-            ? clamp((attendedMin / dur) * 100, 0, 100)
-            : null;
+        const attendedPct = a && dur ? clamp((attendedMin / dur) * 100, 0, 100) : null;
 
-        // NEW: overall time totals (only sessions with known duration)
         if (dur) {
           timeTotals.durationKnownMin += dur;
           if (a) timeTotals.attendedMin += clamp(attendedMin, 0, dur);
@@ -510,9 +479,9 @@ export default async function DashboardPage({
         totals.sessionsAttended += sessionsAttended;
 
         const progNames = e.module.programs
-          .map((x) => x.program.name)
-          .filter((n) => typeof n === "string" && n.length > 0)
-          .sort((a, b) => a.localeCompare(b));
+          .map((x: { program: { name: string } }) => x.program.name)
+          .filter((n: string) => typeof n === "string" && n.length > 0)
+          .sort((a: string, b: string) => a.localeCompare(b));
 
         return {
           moduleCode: e.moduleCode,
@@ -528,14 +497,13 @@ export default async function DashboardPage({
     }
   }
 
-  // NEW: KPIs for selected student
-  const sessionsPct = selected && totals.sessionsHeld > 0
-    ? pct(totals.sessionsAttended, totals.sessionsHeld)
-    : null;
+  const sessionsPct =
+    selected && totals.sessionsHeld > 0 ? pct(totals.sessionsAttended, totals.sessionsHeld) : null;
 
-  const timePct = selected && timeTotals.durationKnownMin > 0
-    ? pct(timeTotals.attendedMin, timeTotals.durationKnownMin)
-    : null;
+  const timePct =
+    selected && timeTotals.durationKnownMin > 0
+      ? pct(timeTotals.attendedMin, timeTotals.durationKnownMin)
+      : null;
 
   const riskLevel = selected ? calcRiskLevel(sessionsPct, timePct) : "No data";
 
@@ -857,7 +825,7 @@ export default async function DashboardPage({
                     </span>
                   </div>
                   <div className="mt-2 text-xs text-slate-500">
-                    High: &lt;50% • Low: ≥75% (sessions + time)
+                    High: &lt;50% • Low: ≥75%
                   </div>
                 </div>
               </div>
