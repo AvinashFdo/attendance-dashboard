@@ -7,16 +7,15 @@ type SearchParams = {
   q?: string;
   student?: string;
 
-  // Filters
-  program?: string; // Program.id
-  intake?: string; // Spring/Summer/Autumn
-  year?: string; // number as string
-  module?: string; // moduleCode
+  program?: string;
+  intake?: string;
+  year?: string;
+  module?: string;
 };
 
 function pct(n: number, d: number) {
   if (!d) return 0;
-  return Math.round((n / d) * 1000) / 10; // 1 decimal
+  return Math.round((n / d) * 1000) / 10;
 }
 
 function clamp(n: number, min: number, max: number) {
@@ -96,7 +95,6 @@ function calcRiskLevel(sessionPct: number | null, timePct: number | null): RiskL
   const t = timePct;
 
   if ((s != null && s < 50) || (t != null && t < 50)) return "High";
-
   if (s != null && t != null && s >= 75 && t >= 75) return "Low";
 
   return "Medium";
@@ -119,7 +117,7 @@ export default async function DashboardPage({
   const q = (sp.q ?? "").trim();
   const selectedStudentId = (sp.student ?? "").trim();
 
-  const programId = (sp.program ?? "").trim(); // Program.id
+  const programId = (sp.program ?? "").trim();
   const intake = (sp.intake ?? "").trim() ? normIntake(sp.intake ?? "") : "";
   const yearNum = (sp.year ?? "").trim() ? Number((sp.year ?? "").trim()) : NaN;
   const moduleFilter = (sp.module ?? "").trim().toUpperCase();
@@ -339,7 +337,6 @@ export default async function DashboardPage({
   }> = [];
 
   const totals = { sessionsHeld: 0, sessionsAttended: 0 };
-
   const timeTotals = { durationKnownMin: 0, attendedMin: 0 };
 
   const sessionsByCohort = new Map<
@@ -348,9 +345,11 @@ export default async function DashboardPage({
       id: string;
       meetingName: string | null;
       startTime: Date | null;
-      durationMin: number | null;
+      scheduledDurationMin: number | null;
+      reportedDurationMin: number | null;
       attended: boolean;
       attendedMin: number;
+      rawAttendedMin: number | null;
       attendedPct: number | null;
     }>
   >();
@@ -429,9 +428,11 @@ export default async function DashboardPage({
           meetingName: true,
           startTime: true,
           durationMin: true,
+          reportedDurationMin: true,
+          scheduledDurationMin: true,
           attendance: {
             where: { studentId: selected.id, isEligible: true },
-            select: { minutes: true },
+            select: { minutes: true, rawMinutes: true, countedMinutes: true },
           },
         },
       });
@@ -444,9 +445,20 @@ export default async function DashboardPage({
 
         if (a) attendedCountMap.set(key, (attendedCountMap.get(key) ?? 0) + 1);
 
-        const attendedMin = a?.minutes ?? 0;
+        const attendedMin =
+          a?.countedMinutes ??
+          a?.minutes ??
+          0;
 
-        const dur = typeof s.durationMin === "number" && s.durationMin > 0 ? s.durationMin : null;
+        const rawAttendedMin = a?.rawMinutes ?? null;
+
+        const dur =
+          typeof s.scheduledDurationMin === "number" && s.scheduledDurationMin > 0
+            ? s.scheduledDurationMin
+            : typeof s.durationMin === "number" && s.durationMin > 0
+            ? s.durationMin
+            : null;
+
         const attendedPct = a && dur ? clamp((attendedMin / dur) * 100, 0, 100) : null;
 
         if (dur) {
@@ -458,9 +470,11 @@ export default async function DashboardPage({
           id: s.id,
           meetingName: s.meetingName,
           startTime: s.startTime,
-          durationMin: s.durationMin,
+          scheduledDurationMin: s.scheduledDurationMin ?? s.durationMin ?? null,
+          reportedDurationMin: s.reportedDurationMin ?? null,
           attended: !!a,
           attendedMin,
+          rawAttendedMin,
           attendedPct,
         };
 
@@ -510,7 +524,6 @@ export default async function DashboardPage({
   return (
     <div className="min-h-screen bg-slate-50">
       <div className="mx-auto w-full max-w-6xl px-4 py-6 md:px-6 md:py-10 space-y-6">
-        {/* Page header */}
         <header className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
           <div className="space-y-1">
             <h1 className="text-2xl md:text-3xl font-semibold tracking-tight text-slate-900">
@@ -521,7 +534,6 @@ export default async function DashboardPage({
             </p>
           </div>
 
-          {/* Import page link */}
           <a
             href="/import"
             className="inline-flex items-center gap-2 h-10 rounded-xl border border-slate-200
@@ -533,8 +545,6 @@ export default async function DashboardPage({
           </a>
         </header>
 
-
-        {/* Filters block (client) */}
         <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="p-4 md:p-6">
             <div className="flex items-start justify-between gap-4">
@@ -562,7 +572,6 @@ export default async function DashboardPage({
           </div>
         </section>
 
-        {/* Search */}
         <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="p-4 md:p-6 space-y-4">
             <div className="space-y-1">
@@ -578,7 +587,6 @@ export default async function DashboardPage({
               action="/dashboard#matches"
               method="get"
             >
-              {/* Clear filters + selected student on new search */}
               <input type="hidden" name="program" value="" />
               <input type="hidden" name="module" value="" />
               <input type="hidden" name="intake" value="" />
@@ -622,15 +630,16 @@ export default async function DashboardPage({
                       key={s.id}
                       className="group rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm
                                  hover:bg-slate-50 hover:border-slate-300"
-                      href={buildDashboardUrl({
-                        q,
-                        student: s.id,
-                        program: programId,
-                        module: moduleFilter,
-                        intake,
-                        year: year ? String(year) : "",
-                      })+ "#student"
-                    }
+                      href={
+                        buildDashboardUrl({
+                          q,
+                          student: s.id,
+                          program: programId,
+                          module: moduleFilter,
+                          intake,
+                          year: year ? String(year) : "",
+                        }) + "#student"
+                      }
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
@@ -657,7 +666,6 @@ export default async function DashboardPage({
           </div>
         </section>
 
-        {/* Cohort Summary */}
         {cohortSummary && (
           <section
             id="cohort"
@@ -760,7 +768,6 @@ export default async function DashboardPage({
           </section>
         )}
 
-        {/* Selected student summary */}
         {selected && (
           <section
             id="student"
@@ -784,7 +791,6 @@ export default async function DashboardPage({
                 </div>
               </div>
 
-              {/* KPIs (now 4 cards) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
                   <div className="text-xs uppercase tracking-wide text-slate-500">Attendance</div>
@@ -881,12 +887,10 @@ export default async function DashboardPage({
 
                           <tr className="border-b border-slate-200 bg-white">
                             <td colSpan={8} className="px-4 py-3">
-                              {/* NOTE: add group here so the chevron rotate works */}
                               <details className="group rounded-2xl border border-slate-200 bg-white">
                                 <summary className="cursor-pointer px-4 py-3 select-none flex items-center justify-between gap-3 list-none">
                                   <div className="flex items-center gap-2">
                                     <span className="font-medium text-slate-900">Sessions</span>
-                                    {/* dropdown icon */}
                                     <svg
                                       viewBox="0 0 20 20"
                                       fill="currentColor"
@@ -911,7 +915,7 @@ export default async function DashboardPage({
                                           <th className="py-3 px-4 text-left font-medium whitespace-nowrap">Date</th>
                                           <th className="py-3 px-4 text-left font-medium">Meeting title</th>
                                           <th className="py-3 px-4 text-left font-medium whitespace-nowrap">Status</th>
-                                          <th className="py-3 px-4 text-right font-medium whitespace-nowrap">Meeting duration</th>
+                                          <th className="py-3 px-4 text-right font-medium whitespace-nowrap">Scheduled</th>
                                           <th className="py-3 px-4 text-right font-medium whitespace-nowrap">Attended</th>
                                           <th className="py-3 px-4 text-right font-medium whitespace-nowrap">% attended</th>
                                         </tr>
@@ -929,7 +933,6 @@ export default async function DashboardPage({
                                               {fmtDate(s.startTime)}
                                             </td>
 
-                                            {/* ✅ Limit title width so the right-side columns sit closer */}
                                             <td className="py-3 px-4 text-slate-900">
                                               <div className="max-w-[520px] leading-snug">
                                                 {s.meetingName ?? "-"}
@@ -949,7 +952,7 @@ export default async function DashboardPage({
                                             </td>
 
                                             <td className="py-3 px-4 text-right tabular-nums text-slate-700 whitespace-nowrap">
-                                              {fmtMinutes(s.durationMin)}
+                                              {fmtMinutes(s.scheduledDurationMin)}
                                             </td>
 
                                             <td className="py-3 px-4 text-right tabular-nums text-slate-700 whitespace-nowrap">
@@ -964,7 +967,7 @@ export default async function DashboardPage({
 
                                         {sessionRows.length === 0 && (
                                           <tr>
-                                            <td className="py-4 px-4 text-slate-600" colSpan={6}>
+                                            <td className="py-4 px-4 text-slate-600" colSpan={7}>
                                               No sessions found for this cohort yet.
                                             </td>
                                           </tr>

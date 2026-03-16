@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
-import { PrismaClient } from "@prisma/client";
 import iconv from "iconv-lite";
-
-const prisma = new PrismaClient();
+import { prisma } from "@/lib/prisma";
 
 function parseModuleCodeFromFilename(name: string): string | null {
   const m = name.match(/\b[A-Z]{2}\d{4}NU\b/i);
@@ -13,7 +11,6 @@ function parseMinutes(value: string): number | null {
   const v = value.trim();
   if (!v) return null;
 
-  // HH:MM:SS
   const hms = v.match(/^(\d{1,2}):(\d{2}):(\d{2})$/);
   if (hms) {
     const h = Number(hms[1]);
@@ -22,7 +19,6 @@ function parseMinutes(value: string): number | null {
     return Math.round(h * 60 + m + s / 60);
   }
 
-  // "2h 25m", "2h25m", "49m 21s", "1h", "55m"
   const hr = v.match(/(\d+)\s*h/i);
   const mr = v.match(/(\d+)\s*m/i);
   const sr = v.match(/(\d+)\s*s/i);
@@ -70,6 +66,11 @@ function normModuleCode(v: string): string {
   return v.trim().toUpperCase();
 }
 
+function clampMinutes(value: number | null, max: number): number | null {
+  if (value == null) return null;
+  return Math.max(0, Math.min(value, max));
+}
+
 export async function POST(req: Request) {
   try {
     const form = await req.formData();
@@ -78,9 +79,11 @@ export async function POST(req: Request) {
     const intakeRaw = String(form.get("intake") ?? "");
     const yearRaw = String(form.get("year") ?? "");
     const moduleFromFormRaw = String(form.get("moduleCode") ?? "");
+    const scheduledDurationRaw = String(form.get("scheduledDuration") ?? "");
 
     const intake = normIntake(intakeRaw);
     const year = Number(yearRaw);
+    const scheduledDurationMin = Number(scheduledDurationRaw);
 
     if (!intake || !year || Number.isNaN(year)) {
       return NextResponse.json(
@@ -89,11 +92,21 @@ export async function POST(req: Request) {
       );
     }
 
+    if (
+      !scheduledDurationRaw ||
+      Number.isNaN(scheduledDurationMin) ||
+      scheduledDurationMin <= 0
+    ) {
+      return NextResponse.json(
+        { error: "Missing or invalid scheduled class duration." },
+        { status: 400 }
+      );
+    }
+
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
     }
 
-    // ✅ Prefer posted moduleCode; fallback to filename only if missing
     const moduleFromForm = normModuleCode(moduleFromFormRaw);
     const moduleFromFilename = parseModuleCodeFromFilename(file.name);
     const moduleCode = moduleFromForm || moduleFromFilename;
@@ -108,12 +121,10 @@ export async function POST(req: Request) {
       );
     }
 
-    // Teams export is typically UTF-16 LE + tab-separated
     const buf = Buffer.from(await file.arrayBuffer());
     const text = iconv.decode(buf, "utf16-le");
     const lines = text.split(/\r?\n/);
 
-    // ---------- 1) Summary (for sessionKey) ----------
     const summary: Record<string, string> = {};
     for (const line of lines) {
       const parts = line.split("\t");
@@ -129,18 +140,16 @@ export async function POST(req: Request) {
     const startTime = parseDate(summary["Start time"] ?? "");
     const endTime = parseDate(summary["End time"] ?? "");
 
-    const durationMin =
+    const reportedDurationMin =
       parseMinutes(summary["Meeting duration"] ?? "") ??
       parseMinutes(summary["Duration"] ?? "") ??
       null;
 
-    // cohort-aware sessionKey (prevents cross-intake collisions)
     const sessionKey =
       `${intake}|${year}|${moduleCode}|${startTime?.toISOString() ?? ""}|${
         endTime?.toISOString() ?? ""
       }|${meetingName ?? ""}`.toLowerCase();
 
-    // ✅ Ensure module exists (NEW schema: Module has NO "program" field)
     await prisma.module.upsert({
       where: { code: moduleCode },
       update: {},
@@ -149,20 +158,31 @@ export async function POST(req: Request) {
 
     const session = await prisma.session.upsert({
       where: { sessionKey },
-      update: { meetingName, startTime, endTime, durationMin, intake, year, moduleCode },
+      update: {
+        meetingName,
+        startTime,
+        endTime,
+        durationMin: scheduledDurationMin,
+        reportedDurationMin,
+        scheduledDurationMin,
+        intake,
+        year,
+        moduleCode,
+      },
       create: {
         sessionKey,
         moduleCode,
         meetingName,
         startTime,
         endTime,
-        durationMin,
+        durationMin: scheduledDurationMin,
+        reportedDurationMin,
+        scheduledDurationMin,
         intake,
         year,
       },
     });
 
-    // ---------- 2) STRICTLY parse Section 2 only ----------
     const idxSection2 = findIndex(lines, (l) => l.trim() === "2. Participants");
     if (idxSection2 === -1) {
       return NextResponse.json(
@@ -220,6 +240,7 @@ export async function POST(req: Request) {
     let rowsRead = 0;
     let attendanceUpserted = 0;
     let eligibleCount = 0;
+    let cappedCount = 0;
 
     for (let i = headerIndex + 1; i < section2End; i++) {
       const line = lines[i];
@@ -248,21 +269,41 @@ export async function POST(req: Request) {
       const lastLeave =
         idxLastLeave >= 0 ? parseDate(parts[idxLastLeave] ?? "") : null;
 
-      const minutes = parseMinutes(parts[idxDuration] ?? "");
+      const rawMinutes = parseMinutes(parts[idxDuration] ?? "");
+      const countedMinutes = clampMinutes(rawMinutes, scheduledDurationMin);
+      if (
+        rawMinutes != null &&
+        countedMinutes != null &&
+        rawMinutes > countedMinutes
+      ) {
+        cappedCount++;
+      }
+
       const role = idxRole >= 0 ? (parts[idxRole] ?? "").trim() || null : null;
 
       await prisma.attendance.upsert({
         where: {
           sessionId_studentId: { sessionId: session.id, studentId: student.id },
         },
-        update: { emailRaw, firstJoin, lastLeave, minutes, role, isEligible },
+        update: {
+          emailRaw,
+          firstJoin,
+          lastLeave,
+          minutes: countedMinutes,
+          rawMinutes,
+          countedMinutes,
+          role,
+          isEligible,
+        },
         create: {
           sessionId: session.id,
           studentId: student.id,
           emailRaw,
           firstJoin,
           lastLeave,
-          minutes,
+          minutes: countedMinutes,
+          rawMinutes,
+          countedMinutes,
           role,
           isEligible,
         },
@@ -280,7 +321,9 @@ export async function POST(req: Request) {
       rowsRead,
       attendanceUpserted,
       eligibleCount,
-      durationMin,
+      reportedDurationMin,
+      scheduledDurationMin,
+      cappedCount,
       sourceUsed: "section2_only",
     });
   } catch (e) {

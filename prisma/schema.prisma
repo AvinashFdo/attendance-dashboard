@@ -18,8 +18,8 @@ model Student {
 }
 
 model Program {
-  id    String @id @default(cuid())
-  name  String @unique
+  id   String @id @default(cuid())
+  name String @unique
 
   modules ProgramModule[]
 }
@@ -71,7 +71,13 @@ model Session {
   meetingName String?
   startTime   DateTime?
   endTime     DateTime?
-  durationMin Int?
+
+  durationMin          Int? // keep temporarily for backward compatibility
+  reportedDurationMin  Int?
+  scheduledDurationMin Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime? @updatedAt
 
   module     Module       @relation(fields: [moduleCode], references: [code], onDelete: Cascade)
   attendance Attendance[]
@@ -86,7 +92,11 @@ model Attendance {
   emailRaw   String?
   firstJoin  DateTime?
   lastLeave  DateTime?
-  minutes    Int?
+
+  minutes        Int? // keep temporarily for backward compatibility
+  rawMinutes     Int?
+  countedMinutes Int?
+
   role       String?
   isEligible Boolean @default(false)
 
