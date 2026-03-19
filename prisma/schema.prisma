@@ -15,6 +15,7 @@ model Student {
 
   enrollments Enrollment[]
   attendance  Attendance[]
+  riskAlerts RiskAlert[]
 }
 
 model Program {
@@ -104,4 +105,25 @@ model Attendance {
   student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
   @@unique([sessionId, studentId])
+}
+
+model RiskAlert {
+  id         String   @id @default(cuid())
+  studentId  String
+  moduleCode String
+  intake     String
+  year       Int
+
+  sessionCount Int
+  timePct     Float
+  status      String   @default("pending") // pending, skipped_dev, sent, failed
+
+  createdAt  DateTime @default(now())
+  uupdatedAt DateTime? @updatedAt
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([moduleCode, intake, year])
+  @@index([studentId])
+  @@unique([studentId, moduleCode, intake, year, sessionCount], name: "riskalert_unique_per_threshold")
 }

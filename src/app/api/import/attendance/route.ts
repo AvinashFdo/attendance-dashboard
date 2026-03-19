@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import iconv from "iconv-lite";
 import { prisma } from "@/lib/prisma";
+import {
+  buildAttendanceAlertBody,
+  buildAttendanceAlertSubject,
+  sendEmail,
+} from "@/lib/email";
 
 function parseModuleCodeFromFilename(name: string): string | null {
   const m = name.match(/\b[A-Z]{2}\d{4}NU\b/i);
@@ -69,6 +74,11 @@ function normModuleCode(v: string): string {
 function clampMinutes(value: number | null, max: number): number | null {
   if (value == null) return null;
   return Math.max(0, Math.min(value, max));
+}
+
+function pct(n: number, d: number): number {
+  if (!d) return 0;
+  return Math.round((n / d) * 1000) / 10;
 }
 
 export async function POST(req: Request) {
@@ -271,6 +281,7 @@ export async function POST(req: Request) {
 
       const rawMinutes = parseMinutes(parts[idxDuration] ?? "");
       const countedMinutes = clampMinutes(rawMinutes, scheduledDurationMin);
+
       if (
         rawMinutes != null &&
         countedMinutes != null &&
@@ -312,6 +323,201 @@ export async function POST(req: Request) {
       attendanceUpserted++;
     }
 
+    // ---------- 3) Risk detection + email flow ----------
+    let riskEvaluationRun = false;
+    let sessionCountForCohort = 0;
+    let highRiskCount = 0;
+    let alertsCreated = 0;
+    let alertsAlreadyExisting = 0;
+    let emailDisabledCount = 0;
+    let emailTestModeCount = 0;
+    let emailSentCount = 0;
+    let emailFailedCount = 0;
+
+    const sessions = await prisma.session.findMany({
+      where: { moduleCode, intake, year },
+      select: {
+        id: true,
+        scheduledDurationMin: true,
+        durationMin: true,
+        attendance: {
+          where: { isEligible: true },
+          select: {
+            studentId: true,
+            countedMinutes: true,
+            minutes: true,
+          },
+        },
+      },
+      orderBy: { startTime: "asc" },
+    });
+
+    sessionCountForCohort = sessions.length;
+
+    const alertCheckpoints = new Set([5, 8]);
+
+    if (alertCheckpoints.has(sessionCountForCohort)) {
+      riskEvaluationRun = true;
+
+      const moduleRecord = await prisma.module.findUnique({
+        where: { code: moduleCode },
+        select: { name: true },
+      });
+
+      const moduleName = moduleRecord?.name ?? moduleCode;
+
+      const enrollments = await prisma.enrollment.findMany({
+        where: {
+          moduleCode,
+          intake,
+          year,
+          student: {
+            email: { endsWith: "@stu.nexteducationgroup.com", mode: "insensitive" },
+          },
+        },
+        select: {
+          studentId: true,
+          student: {
+            select: {
+              name: true,
+              email: true,
+            },
+          },
+        },
+      });
+
+      const enrolledStudentIds = enrollments.map((e) => e.studentId);
+
+      const totalScheduledMin = sessions.reduce((sum, s) => {
+        const dur =
+          typeof s.scheduledDurationMin === "number" && s.scheduledDurationMin > 0
+            ? s.scheduledDurationMin
+            : typeof s.durationMin === "number" && s.durationMin > 0
+            ? s.durationMin
+            : 0;
+        return sum + dur;
+      }, 0);
+
+      if (enrolledStudentIds.length > 0 && totalScheduledMin > 0) {
+        const attendedMap = new Map<string, number>();
+
+        for (const s of sessions) {
+          const dur =
+            typeof s.scheduledDurationMin === "number" && s.scheduledDurationMin > 0
+              ? s.scheduledDurationMin
+              : typeof s.durationMin === "number" && s.durationMin > 0
+              ? s.durationMin
+              : 0;
+
+          for (const a of s.attendance) {
+            if (!enrolledStudentIds.includes(a.studentId)) continue;
+
+            const counted =
+              typeof a.countedMinutes === "number"
+                ? a.countedMinutes
+                : typeof a.minutes === "number"
+                ? a.minutes
+                : 0;
+
+            const safeCounted = Math.max(0, Math.min(counted, dur));
+            attendedMap.set(a.studentId, (attendedMap.get(a.studentId) ?? 0) + safeCounted);
+          }
+        }
+
+        for (const e of enrollments) {
+          const attendedMin = attendedMap.get(e.studentId) ?? 0;
+          const timePct = pct(attendedMin, totalScheduledMin);
+
+          if (timePct < 70) {
+            highRiskCount++;
+
+            const existing = await prisma.riskAlert.findUnique({
+              where: {
+                riskalert_unique_per_threshold: {
+                  studentId: e.studentId,
+                  moduleCode,
+                  intake,
+                  year,
+                  sessionCount: sessionCountForCohort,
+                },
+              },
+            });
+
+            if (existing) {
+              alertsAlreadyExisting++;
+              continue;
+            }
+
+            const createdAlert = await prisma.riskAlert.create({
+              data: {
+                studentId: e.studentId,
+                moduleCode,
+                intake,
+                year,
+                sessionCount: sessionCountForCohort,
+                timePct,
+                status: "pending",
+              },
+            });
+
+            alertsCreated++;
+
+            const subject = buildAttendanceAlertSubject();
+
+            const text = buildAttendanceAlertBody({
+              studentName: e.student.name,
+              moduleName,
+              sessionCount: sessionCountForCohort,
+              timePct,
+            });
+
+            const emailResult = await sendEmail({
+              to: e.student.email,
+              subject,
+              text,
+            });
+
+            if (emailResult.ok) {
+              if (emailResult.status === "disabled") {
+                emailDisabledCount++;
+                await prisma.riskAlert.update({
+                  where: { id: createdAlert.id },
+                  data: { status: "disabled" },
+                });
+              } else if (emailResult.status === "test_mode") {
+                emailTestModeCount++;
+                await prisma.riskAlert.update({
+                  where: { id: createdAlert.id },
+                  data: { status: "test_mode" },
+                });
+              } else if (emailResult.status === "sent") {
+                emailSentCount++;
+                await prisma.riskAlert.update({
+                  where: { id: createdAlert.id },
+                  data: { status: "sent" },
+                });
+              }
+            } else {
+              emailFailedCount++;
+              console.error("[email-send-failed]", {
+                studentEmail: e.student.email,
+                moduleCode,
+                intake,
+                year,
+                sessionCount: sessionCountForCohort,
+                error: emailResult.error,
+              });
+
+              await prisma.riskAlert.update({
+                where: { id: createdAlert.id },
+                data: { status: "failed" },
+              });
+            }
+          }
+        }
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       moduleCode,
@@ -325,6 +531,20 @@ export async function POST(req: Request) {
       scheduledDurationMin,
       cappedCount,
       sourceUsed: "section2_only",
+
+      // Risk evaluation summary
+      riskEvaluationRun,
+      sessionCountForCohort,
+      highRiskCount,
+      alertsCreated,
+      alertsAlreadyExisting,
+
+      // Email summary
+      emailSending: "dev_safe",
+      emailDisabledCount,
+      emailTestModeCount,
+      emailSentCount,
+      emailFailedCount,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Import failed";

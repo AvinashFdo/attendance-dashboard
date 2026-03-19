@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import AppShell from "@/components/AppShell";
 
 type UploadRow = {
   id: string;
@@ -75,6 +76,7 @@ function fmtDate(value: string | null) {
     year: "numeric",
     month: "short",
     day: "2-digit",
+    timeZone: "UTC",
   }).format(d);
 }
 
@@ -88,6 +90,7 @@ function fmtDateTime(value: string | null) {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: "UTC",
   }).format(d);
 }
 
@@ -256,12 +259,12 @@ export default function UploadsPage() {
   }, [rows]);
 
   const sortedRows = useMemo(() => {
-  return [...rows].sort((a, b) => {
-    const ad = new Date(a.createdAt).getTime();
-    const bd = new Date(b.createdAt).getTime();
-    return bd - ad; // newest upload first
-  });
-}, [rows]);
+    return [...rows].sort((a, b) => {
+      const ad = new Date(a.createdAt).getTime();
+      const bd = new Date(b.createdAt).getTime();
+      return bd - ad;
+    });
+  }, [rows]);
 
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -320,257 +323,225 @@ export default function UploadsPage() {
     "hover:bg-slate-50 hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-slate-300";
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <div className="mx-auto w-full max-w-7xl px-4 py-6 md:px-6 md:py-10 space-y-6">
-        <header className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+    <AppShell
+      title="Uploaded Sessions"
+      subtitle="Review uploaded attendance sessions and delete mistakes when needed."
+    >
+      {msg && (
+        <div
+          className={`rounded-2xl border px-4 py-3 text-sm ${
+            msg.startsWith("✅")
+              ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+              : "border-rose-200 bg-rose-50 text-rose-900"
+          }`}
+        >
+          {msg}
+        </div>
+      )}
+
+      <section className={cardClass}>
+        <div className="p-4 md:p-6">
           <div className="space-y-1">
-            <h1 className="text-2xl md:text-3xl font-semibold tracking-tight text-slate-900">
-              Uploaded Sessions
-            </h1>
+            <h2 className="text-base font-semibold text-slate-900">Filters</h2>
             <p className="text-sm text-slate-600">
-              Review uploaded attendance sessions and delete mistakes when needed.
+              Narrow down uploads before deleting a session.
             </p>
           </div>
 
-          <div className="flex gap-2">
-            <a
-              href="/import"
-              className="inline-flex items-center gap-2 h-10 rounded-xl border border-slate-200
-                        bg-white px-4 text-sm font-medium text-slate-900 shadow-sm
-                        hover:bg-slate-50 hover:border-slate-300
-                        focus:outline-none focus:ring-2 focus:ring-slate-300"
-            >
-              Import page
-            </a>
-
-            <a
-              href="/dashboard"
-              className="inline-flex items-center gap-2 h-10 rounded-xl border border-slate-200
-                        bg-white px-4 text-sm font-medium text-slate-900 shadow-sm
-                        hover:bg-slate-50 hover:border-slate-300
-                        focus:outline-none focus:ring-2 focus:ring-slate-300"
-            >
-              Dashboard
-            </a>
-          </div>
-        </header>
-
-        {msg && (
-          <div
-            className={`rounded-2xl border px-4 py-3 text-sm ${
-              msg.startsWith("✅")
-                ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-                : "border-rose-200 bg-rose-50 text-rose-900"
-            }`}
-          >
-            {msg}
-          </div>
-        )}
-
-        <section className={cardClass}>
-          <div className="p-4 md:p-6">
-            <div className="space-y-1">
-              <h2 className="text-base font-semibold text-slate-900">Filters</h2>
-              <p className="text-sm text-slate-600">
-                Narrow down uploads before deleting a session.
-              </p>
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
+            <div>
+              <label className={labelClass}>Search</label>
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Meeting title, date, module..."
+                className={inputClass}
+              />
             </div>
 
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
-              <div>
-                <label className={labelClass}>Search</label>
-                <input
-                  type="text"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Meeting title, date, module..."
-                  className={inputClass}
-                />
-              </div>
-
-              <div>
-                <label className={labelClass}>Program</label>
-                {modulesLoading ? (
-                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
-                    Loading...
-                  </div>
-                ) : (
-                  <select
-                    className={selectClass}
-                    value={selectedProgram}
-                    onChange={(e) => setSelectedProgram(e.target.value)}
-                  >
-                    <option value="">All programs</option>
-                    {programOptions.map((p) => (
-                      <option key={p} value={p}>
-                        {p}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
-
-              <div>
-                <label className={labelClass}>Module</label>
-                {modulesLoading ? (
-                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
-                    Loading...
-                  </div>
-                ) : (
-                  <select
-                    className={selectClass}
-                    value={selectedModuleCode}
-                    onChange={(e) => setSelectedModuleCode(e.target.value)}
-                  >
-                    <option value="">All modules</option>
-                    {filteredModules.map((m) => (
-                      <option key={m.code} value={m.code}>
-                        {m.code} - {m.name}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
-
-              <div>
-                <label className={labelClass}>Intake</label>
+            <div>
+              <label className={labelClass}>Program</label>
+              {modulesLoading ? (
+                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
+                  Loading...
+                </div>
+              ) : (
                 <select
                   className={selectClass}
-                  value={selectedIntake}
-                  onChange={(e) => setSelectedIntake(e.target.value)}
+                  value={selectedProgram}
+                  onChange={(e) => setSelectedProgram(e.target.value)}
                 >
-                  <option value="">All intakes</option>
-                  <option value="Spring">Spring</option>
-                  <option value="Summer">Summer</option>
-                  <option value="Autumn">Autumn</option>
-                </select>
-              </div>
-
-              <div>
-                <label className={labelClass}>Year</label>
-                <select
-                  className={selectClass}
-                  value={selectedYear}
-                  onChange={(e) => setSelectedYear(e.target.value)}
-                >
-                  <option value="">All years</option>
-                  {yearOptions.map((y) => (
-                    <option key={y} value={String(y)}>
-                      {y}
+                  <option value="">All programs</option>
+                  {programOptions.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
                     </option>
                   ))}
                 </select>
-              </div>
+              )}
             </div>
 
-            <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-sm text-slate-600">
-                {filteredRows.length} session{filteredRows.length === 1 ? "" : "s"} shown
-              </div>
+            <div>
+              <label className={labelClass}>Module</label>
+              {modulesLoading ? (
+                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
+                  Loading...
+                </div>
+              ) : (
+                <select
+                  className={selectClass}
+                  value={selectedModuleCode}
+                  onChange={(e) => setSelectedModuleCode(e.target.value)}
+                >
+                  <option value="">All modules</option>
+                  {filteredModules.map((m) => (
+                    <option key={m.code} value={m.code}>
+                      {m.code} - {m.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
 
-              <button
-                type="button"
-                className={clearButtonClass}
-                onClick={() => {
-                  setSearch("");
-                  setSelectedProgram("");
-                  setSelectedModuleCode("");
-                  setSelectedIntake("");
-                  setSelectedYear("");
-                }}
+            <div>
+              <label className={labelClass}>Intake</label>
+              <select
+                className={selectClass}
+                value={selectedIntake}
+                onChange={(e) => setSelectedIntake(e.target.value)}
               >
-                Clear filters
-              </button>
+                <option value="">All intakes</option>
+                <option value="Spring">Spring</option>
+                <option value="Summer">Summer</option>
+                <option value="Autumn">Autumn</option>
+              </select>
+            </div>
+
+            <div>
+              <label className={labelClass}>Year</label>
+              <select
+                className={selectClass}
+                value={selectedYear}
+                onChange={(e) => setSelectedYear(e.target.value)}
+              >
+                <option value="">All years</option>
+                {yearOptions.map((y) => (
+                  <option key={y} value={String(y)}>
+                    {y}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
-        </section>
 
-        <section className={cardClass}>
-          <div className="p-4 md:p-6">
-            {loading ? (
-              <div className="text-sm text-slate-600">Loading uploaded sessions...</div>
-            ) : filteredRows.length === 0 ? (
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-                No uploaded sessions found for the current filters.
-              </div>
-            ) : (
-              <div className="overflow-auto rounded-2xl border border-slate-200">
-                <table className="w-full text-sm">
-                  <thead className="bg-slate-50 text-slate-600">
-                    <tr className="border-b border-slate-200">
-                      <th className="py-3 px-4 text-left font-medium whitespace-nowrap">Date</th>
-                      <th className="py-3 px-4 text-left font-medium">Meeting title</th>
-                      <th className="py-3 px-4 text-left font-medium whitespace-nowrap">Module</th>
-                      <th className="py-3 px-4 text-left font-medium whitespace-nowrap">Intake</th>
-                      <th className="py-3 px-4 text-left font-medium whitespace-nowrap">Year</th>
-                      <th className="py-3 px-4 text-right font-medium whitespace-nowrap">Scheduled</th>
-                      <th className="py-3 px-4 text-right font-medium whitespace-nowrap">Rows</th>
-                      <th className="py-3 px-4 text-left font-medium whitespace-nowrap">Uploaded</th>
-                      <th className="py-3 px-4 text-right font-medium whitespace-nowrap">Action</th>
-                    </tr>
-                  </thead>
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-sm text-slate-600">
+              {filteredRows.length} session{filteredRows.length === 1 ? "" : "s"} shown
+            </div>
 
-                  <tbody>
-                    {filteredRows.map((r, idx) => (
-                      <tr
-                        key={r.id}
-                        className={`border-b border-slate-100 ${
-                          idx % 2 === 0 ? "bg-white" : "bg-slate-50/50"
-                        } hover:bg-slate-50`}
-                      >
-                        <td className="py-3 px-4 whitespace-nowrap text-slate-900">
-                          {fmtDate(r.startTime)}
-                        </td>
-
-                        <td className="py-3 px-4 text-slate-900">
-                          <div className="max-w-[480px] leading-snug">
-                            {r.meetingName ?? "-"}
-                          </div>
-                        </td>
-
-                        <td className="py-3 px-4 whitespace-nowrap text-slate-700">
-                          {r.moduleCode}
-                        </td>
-
-                        <td className="py-3 px-4 whitespace-nowrap text-slate-700">
-                          {r.intake}
-                        </td>
-
-                        <td className="py-3 px-4 whitespace-nowrap text-slate-700 tabular-nums">
-                          {r.year}
-                        </td>
-
-                        <td className="py-3 px-4 whitespace-nowrap text-right tabular-nums text-slate-700">
-                          {fmtMinutes(r.scheduledDurationMin)}
-                        </td>
-
-                        <td className="py-3 px-4 whitespace-nowrap text-right tabular-nums text-slate-900">
-                          {r.attendanceCount}
-                        </td>
-
-                        <td className="py-3 px-4 whitespace-nowrap text-slate-700">
-                          {fmtDateTime(r.createdAt)}
-                        </td>
-
-                        <td className="py-3 px-4 text-right">
-                          <button
-                            type="button"
-                            className={deleteButtonClass}
-                            disabled={deletingId === r.id}
-                            onClick={() => deleteUpload(r.id, r.meetingName)}
-                          >
-                            {deletingId === r.id ? "Deleting..." : "Delete"}
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            <button
+              type="button"
+              className={clearButtonClass}
+              onClick={() => {
+                setSearch("");
+                setSelectedProgram("");
+                setSelectedModuleCode("");
+                setSelectedIntake("");
+                setSelectedYear("");
+              }}
+            >
+              Clear filters
+            </button>
           </div>
-        </section>
-      </div>
-    </div>
+        </div>
+      </section>
+
+      <section className={cardClass}>
+        <div className="p-4 md:p-6">
+          {loading ? (
+            <div className="text-sm text-slate-600">Loading uploaded sessions...</div>
+          ) : filteredRows.length === 0 ? (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+              No uploaded sessions found for the current filters.
+            </div>
+          ) : (
+            <div className="overflow-auto rounded-2xl border border-slate-200">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 text-slate-600">
+                  <tr className="border-b border-slate-200">
+                    <th className="py-3 px-4 text-left font-medium whitespace-nowrap">Date</th>
+                    <th className="py-3 px-4 text-left font-medium">Meeting title</th>
+                    <th className="py-3 px-4 text-left font-medium whitespace-nowrap">Module</th>
+                    <th className="py-3 px-4 text-left font-medium whitespace-nowrap">Intake</th>
+                    <th className="py-3 px-4 text-left font-medium whitespace-nowrap">Year</th>
+                    <th className="py-3 px-4 text-right font-medium whitespace-nowrap">Scheduled</th>
+                    <th className="py-3 px-4 text-right font-medium whitespace-nowrap">Rows</th>
+                    <th className="py-3 px-4 text-left font-medium whitespace-nowrap">Uploaded</th>
+                    <th className="py-3 px-4 text-right font-medium whitespace-nowrap">Action</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {filteredRows.map((r, idx) => (
+                    <tr
+                      key={r.id}
+                      className={`border-b border-slate-100 ${
+                        idx % 2 === 0 ? "bg-white" : "bg-slate-50/50"
+                      } hover:bg-slate-50`}
+                    >
+                      <td className="py-3 px-4 whitespace-nowrap text-slate-900">
+                        {fmtDate(r.startTime)}
+                      </td>
+
+                      <td className="py-3 px-4 text-slate-900">
+                        <div className="max-w-[480px] leading-snug">
+                          {r.meetingName ?? "-"}
+                        </div>
+                      </td>
+
+                      <td className="py-3 px-4 whitespace-nowrap text-slate-700">
+                        {r.moduleCode}
+                      </td>
+
+                      <td className="py-3 px-4 whitespace-nowrap text-slate-700">
+                        {r.intake}
+                      </td>
+
+                      <td className="py-3 px-4 whitespace-nowrap text-slate-700 tabular-nums">
+                        {r.year}
+                      </td>
+
+                      <td className="py-3 px-4 whitespace-nowrap text-right tabular-nums text-slate-700">
+                        {fmtMinutes(r.scheduledDurationMin)}
+                      </td>
+
+                      <td className="py-3 px-4 whitespace-nowrap text-right tabular-nums text-slate-900">
+                        {r.attendanceCount}
+                      </td>
+
+                      <td className="py-3 px-4 whitespace-nowrap text-slate-700">
+                        {fmtDateTime(r.createdAt)}
+                      </td>
+
+                      <td className="py-3 px-4 text-right">
+                        <button
+                          type="button"
+                          className={deleteButtonClass}
+                          disabled={deletingId === r.id}
+                          onClick={() => deleteUpload(r.id, r.meetingName)}
+                        >
+                          {deletingId === r.id ? "Deleting..." : "Delete"}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </section>
+    </AppShell>
   );
 }

@@ -2,6 +2,7 @@ import React from "react";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 import FiltersForm from "./FiltersForm";
+import AppShell from "@/components/AppShell";
 
 type SearchParams = {
   q?: string;
@@ -34,6 +35,7 @@ function fmtDate(d: Date | null) {
     year: "numeric",
     month: "short",
     day: "2-digit",
+    timeZone: "UTC",
   }).format(d);
 }
 
@@ -86,24 +88,16 @@ function buildDashboardUrl(params: {
   return `/dashboard?${new URLSearchParams(params).toString()}`;
 }
 
-type RiskLevel = "No data" | "High" | "Medium" | "Low";
+type RiskLevel = "No data" | "High" | "Low";
 
-function calcRiskLevel(sessionPct: number | null, timePct: number | null): RiskLevel {
-  if (sessionPct == null && timePct == null) return "No data";
-
-  const s = sessionPct;
-  const t = timePct;
-
-  if ((s != null && s < 50) || (t != null && t < 50)) return "High";
-  if (s != null && t != null && s >= 75 && t >= 75) return "Low";
-
-  return "Medium";
+function calcRiskLevel(timePct: number | null): RiskLevel {
+  if (timePct == null) return "No data";
+  return timePct < 70 ? "High" : "Low";
 }
 
 function riskBadgeClasses(level: RiskLevel) {
   if (level === "High") return "bg-rose-50 text-rose-700 ring-1 ring-rose-200";
   if (level === "Low") return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200";
-  if (level === "Medium") return "bg-amber-50 text-amber-800 ring-1 ring-amber-200";
   return "bg-slate-50 text-slate-700 ring-1 ring-slate-200";
 }
 
@@ -445,11 +439,7 @@ export default async function DashboardPage({
 
         if (a) attendedCountMap.set(key, (attendedCountMap.get(key) ?? 0) + 1);
 
-        const attendedMin =
-          a?.countedMinutes ??
-          a?.minutes ??
-          0;
-
+        const attendedMin = a?.countedMinutes ?? a?.minutes ?? 0;
         const rawAttendedMin = a?.rawMinutes ?? null;
 
         const dur =
@@ -511,497 +501,474 @@ export default async function DashboardPage({
     }
   }
 
-  const sessionsPct =
-    selected && totals.sessionsHeld > 0 ? pct(totals.sessionsAttended, totals.sessionsHeld) : null;
-
   const timePct =
     selected && timeTotals.durationKnownMin > 0
       ? pct(timeTotals.attendedMin, timeTotals.durationKnownMin)
       : null;
 
-  const riskLevel = selected ? calcRiskLevel(sessionsPct, timePct) : "No data";
+  const riskLevel = selected ? calcRiskLevel(timePct) : "No data";
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <div className="mx-auto w-full max-w-6xl px-4 py-6 md:px-6 md:py-10 space-y-6">
-        <header className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+  <AppShell
+    title="Attendance Dashboard"
+    subtitle="Search students and review cohort / student attendance summaries."
+  >
+    <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="p-4 md:p-6">
+        <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
-            <h1 className="text-2xl md:text-3xl font-semibold tracking-tight text-slate-900">
-              Attendance Dashboard
-            </h1>
+            <h2 className="text-base font-semibold text-slate-900">Filters</h2>
             <p className="text-sm text-slate-600">
-              Search students and review cohort / student attendance summaries.
+              Narrow results by program, module, intake and year.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <FiltersForm
+            q={q}
+            student={selectedStudentId}
+            programId={programId}
+            moduleFilter={moduleFilter}
+            intake={intake}
+            year={year ? String(year) : "2026"}
+            programs={programs}
+            moduleOptions={moduleOptions}
+            cohortSelected={cohortSelected}
+          />
+        </div>
+      </div>
+    </section>
+
+    <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="p-4 md:p-6 space-y-4">
+        <div className="space-y-1">
+          <h2 className="text-base font-semibold text-slate-900">Student Search</h2>
+          <p className="text-sm text-slate-600">
+            Search by name or email (only{" "}
+            <span className="font-medium">@stu.nexteducationgroup.com</span> will appear).
+          </p>
+        </div>
+
+        <form
+          className="flex flex-col gap-2 sm:flex-row sm:items-center"
+          action="/dashboard#matches"
+          method="get"
+        >
+          <input type="hidden" name="program" value="" />
+          <input type="hidden" name="module" value="" />
+          <input type="hidden" name="intake" value="" />
+          <input type="hidden" name="year" value="" />
+          <input type="hidden" name="student" value="" />
+
+          <div className="flex-1">
+            <input
+              name="q"
+              defaultValue={q}
+              placeholder="e.g. John Doe or john@stu.nexteducationgroup.com"
+              className="w-full h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm
+                        placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300"
+            />
+          </div>
+
+          <button
+            className="h-10 rounded-xl border border-slate-200 bg-slate-900 px-4 text-sm font-medium text-white
+                      shadow-sm hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
+          >
+            Search
+          </button>
+        </form>
+
+        {q.length > 0 && q.length < 2 && (
+          <div className="text-sm text-slate-600">
+            Type at least <span className="font-medium">2 characters</span>.
+          </div>
+        )}
+
+        {students.length > 0 && (
+          <div id="matches" className="pt-2 scroll-mt-6">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-medium text-slate-900">Matches</div>
+              <div className="text-xs text-slate-500">{students.length} shown</div>
+            </div>
+
+            <div className="mt-3 grid gap-2">
+              {students.map((s) => (
+                <a
+                  key={s.id}
+                  className="group rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm
+                             hover:bg-slate-50 hover:border-slate-300"
+                  href={
+                    buildDashboardUrl({
+                      q,
+                      student: s.id,
+                      program: programId,
+                      module: moduleFilter,
+                      intake,
+                      year: year ? String(year) : "",
+                    }) + "#student"
+                  }
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-medium text-slate-900 truncate">
+                        {s.name ?? "(no name)"}
+                      </div>
+                      <div className="text-sm text-slate-600 truncate">{s.email}</div>
+                    </div>
+                    <div className="text-xs text-slate-500 group-hover:text-slate-700">
+                      View →
+                    </div>
+                  </div>
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {q.length >= 2 && students.length === 0 && (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+            No matches for current filters (only @stu.nexteducationgroup.com are shown).
+          </div>
+        )}
+      </div>
+    </section>
+
+    {cohortSummary && (
+      <section
+        id="cohort"
+        className="rounded-2xl border border-slate-200 bg-white shadow-sm scroll-mt-6"
+      >
+        <div className="p-4 md:p-6 space-y-5">
+          <div className="space-y-1">
+            <h2 className="text-base md:text-lg font-semibold text-slate-900">
+              Cohort Summary
+              <span className="ml-2 text-slate-500 font-medium">
+                - {cohortSummary.intake} {cohortSummary.year}
+              </span>
+            </h2>
+            <p className="text-sm text-slate-600">
+              {cohortSummary.programsText} · {cohortSummary.moduleCode} · {cohortSummary.moduleName}
             </p>
           </div>
 
-          <a
-            href="/import"
-            className="inline-flex items-center gap-2 h-10 rounded-xl border border-slate-200
-                      bg-white px-4 text-sm font-medium text-slate-900 shadow-sm
-                      hover:bg-slate-50 hover:border-slate-300
-                      focus:outline-none focus:ring-2 focus:ring-slate-300"
-          >
-            Import data
-          </a>
-        </header>
-
-        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="p-4 md:p-6">
-            <div className="flex items-start justify-between gap-4">
-              <div className="space-y-1">
-                <h2 className="text-base font-semibold text-slate-900">Filters</h2>
-                <p className="text-sm text-slate-600">
-                  Narrow results by program, module, intake and year.
-                </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+              <div className="text-xs uppercase tracking-wide text-slate-500">Students enrolled</div>
+              <div className="mt-1 text-2xl font-semibold text-slate-900">
+                {cohortSummary.totalEnrolled}
               </div>
             </div>
-
-            <div className="mt-4">
-              <FiltersForm
-                q={q}
-                student={selectedStudentId}
-                programId={programId}
-                moduleFilter={moduleFilter}
-                intake={intake}
-                year={year ? String(year) : "2026"}
-                programs={programs}
-                moduleOptions={moduleOptions}
-                cohortSelected={cohortSelected}
-              />
+            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+              <div className="text-xs uppercase tracking-wide text-slate-500">Sessions completed</div>
+              <div className="mt-1 text-2xl font-semibold text-slate-900">
+                {cohortSummary.sessionsHeld}
+              </div>
             </div>
           </div>
-        </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="p-4 md:p-6 space-y-4">
-            <div className="space-y-1">
-              <h2 className="text-base font-semibold text-slate-900">Student Search</h2>
-              <p className="text-sm text-slate-600">
-                Search by name or email (only{" "}
-                <span className="font-medium">@stu.nexteducationgroup.com</span> will appear).
-              </p>
-            </div>
+          <div className="overflow-auto rounded-2xl border border-slate-200">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-slate-600">
+                <tr className="border-b border-slate-200">
+                  <th className="py-3 px-4 text-left font-medium">Student</th>
+                  <th className="py-3 px-4 text-left font-medium">Email</th>
+                  <th className="py-3 px-4 text-right font-medium">Attended</th>
+                  <th className="py-3 px-4 text-right font-medium">Sessions</th>
+                  <th className="py-3 px-4 text-right font-medium">%</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cohortSummary.rows.map((r, idx) => (
+                  <tr
+                    key={r.studentId}
+                    className={`border-b border-slate-100 ${
+                      idx % 2 === 0 ? "bg-white" : "bg-slate-50/50"
+                    } hover:bg-slate-50`}
+                  >
+                    <td className="py-3 px-4">
+                      <a
+                        className="font-medium text-slate-900 hover:underline"
+                        href={
+                          buildDashboardUrl({
+                            q,
+                            student: r.studentId,
+                            program: programId,
+                            module: moduleFilter,
+                            intake,
+                            year: year ? String(year) : "",
+                          }) + "#student"
+                        }
+                      >
+                        {r.name ?? "(no name)"}
+                      </a>
+                    </td>
+                    <td className="py-3 px-4 text-slate-700">{r.email}</td>
+                    <td className="py-3 px-4 text-right tabular-nums text-slate-900">
+                      {r.sessionsAttended}
+                    </td>
+                    <td className="py-3 px-4 text-right tabular-nums text-slate-700">
+                      {cohortSummary.sessionsHeld}
+                    </td>
+                    <td className="py-3 px-4 text-right tabular-nums font-medium text-slate-900">
+                      {r.attendancePct}%
+                    </td>
+                  </tr>
+                ))}
 
-            <form
-              className="flex flex-col gap-2 sm:flex-row sm:items-center"
-              action="/dashboard#matches"
-              method="get"
-            >
-              <input type="hidden" name="program" value="" />
-              <input type="hidden" name="module" value="" />
-              <input type="hidden" name="intake" value="" />
-              <input type="hidden" name="year" value="" />
-              <input type="hidden" name="student" value="" />
-
-              <div className="flex-1">
-                <input
-                  name="q"
-                  defaultValue={q}
-                  placeholder="e.g. John Doe or john@stu.nexteducationgroup.com"
-                  className="w-full h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm
-                            placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300"
-                />
-              </div>
-
-              <button
-                className="h-10 rounded-xl border border-slate-200 bg-slate-900 px-4 text-sm font-medium text-white
-                          shadow-sm hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
-              >
-                Search
-              </button>
-            </form>
-
-            {q.length > 0 && q.length < 2 && (
-              <div className="text-sm text-slate-600">
-                Type at least <span className="font-medium">2 characters</span>.
-              </div>
-            )}
-
-            {students.length > 0 && (
-              <div id="matches" className="pt-2 scroll-mt-6">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-medium text-slate-900">Matches</div>
-                  <div className="text-xs text-slate-500">{students.length} shown</div>
-                </div>
-
-                <div className="mt-3 grid gap-2">
-                  {students.map((s) => (
-                    <a
-                      key={s.id}
-                      className="group rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm
-                                 hover:bg-slate-50 hover:border-slate-300"
-                      href={
-                        buildDashboardUrl({
-                          q,
-                          student: s.id,
-                          program: programId,
-                          module: moduleFilter,
-                          intake,
-                          year: year ? String(year) : "",
-                        }) + "#student"
-                      }
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="font-medium text-slate-900 truncate">
-                            {s.name ?? "(no name)"}
-                          </div>
-                          <div className="text-sm text-slate-600 truncate">{s.email}</div>
-                        </div>
-                        <div className="text-xs text-slate-500 group-hover:text-slate-700">
-                          View →
-                        </div>
-                      </div>
-                    </a>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {q.length >= 2 && students.length === 0 && (
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
-                No matches for current filters (only @stu.nexteducationgroup.com are shown).
-              </div>
-            )}
+                {cohortSummary.rows.length === 0 && (
+                  <tr>
+                    <td className="py-4 px-4 text-slate-600" colSpan={5}>
+                      No students enrolled for this cohort (or none with @stu.nexteducationgroup.com).
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
-        </section>
 
-        {cohortSummary && (
-          <section
-            id="cohort"
-            className="rounded-2xl border border-slate-200 bg-white shadow-sm scroll-mt-6"
-          >
-            <div className="p-4 md:p-6 space-y-5">
-              <div className="space-y-1">
-                <h2 className="text-base md:text-lg font-semibold text-slate-900">
-                  Cohort Summary
-                  <span className="ml-2 text-slate-500 font-medium">
-                    - {cohortSummary.intake} {cohortSummary.year}
+          {cohortSummary.sessionsHeld === 0 && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+              No sessions imported yet for this cohort. Upload attendance CSVs for this cohort to populate.
+            </div>
+          )}
+        </div>
+      </section>
+    )}
+
+    {selected && (
+      <section
+        id="student"
+        className="rounded-2xl border border-slate-200 bg-white shadow-sm scroll-mt-6"
+      >
+        <div className="p-4 md:p-6 space-y-5">
+          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+            <div className="space-y-1 min-w-0">
+              <h2 className="text-base md:text-lg font-semibold text-slate-900 truncate">
+                {selected.name ?? "(no name)"}
+              </h2>
+              <div className="text-sm text-slate-600 truncate">{selected.email}</div>
+              {moduleRows.length > 0 && (
+                <div className="text-sm text-slate-600">
+                  Program:{" "}
+                  <span className="font-medium text-slate-900">
+                    {moduleRows[0].programsText ?? "-"}
                   </span>
-                </h2>
-                <p className="text-sm text-slate-600">
-                  {cohortSummary.programsText} · {cohortSummary.moduleCode} · {cohortSummary.moduleName}
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                  <div className="text-xs uppercase tracking-wide text-slate-500">Students enrolled</div>
-                  <div className="mt-1 text-2xl font-semibold text-slate-900">
-                    {cohortSummary.totalEnrolled}
-                  </div>
                 </div>
-                <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                  <div className="text-xs uppercase tracking-wide text-slate-500">Sessions completed</div>
-                  <div className="mt-1 text-2xl font-semibold text-slate-900">
-                    {cohortSummary.sessionsHeld}
-                  </div>
-                </div>
-              </div>
+              )}
+            </div>
+          </div>
 
-              <div className="overflow-auto rounded-2xl border border-slate-200">
-                <table className="w-full text-sm">
-                  <thead className="bg-slate-50 text-slate-600">
-                    <tr className="border-b border-slate-200">
-                      <th className="py-3 px-4 text-left font-medium">Student</th>
-                      <th className="py-3 px-4 text-left font-medium">Email</th>
-                      <th className="py-3 px-4 text-right font-medium">Attended</th>
-                      <th className="py-3 px-4 text-right font-medium">Sessions</th>
-                      <th className="py-3 px-4 text-right font-medium">%</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {cohortSummary.rows.map((r, idx) => (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+              <div className="text-xs uppercase tracking-wide text-slate-500">Attendance</div>
+              <div className="mt-1 text-2xl font-semibold text-slate-900">
+                {pct(totals.sessionsAttended, totals.sessionsHeld)}%
+              </div>
+              <div className="mt-1 text-xs text-slate-500">By sessions</div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+              <div className="text-xs uppercase tracking-wide text-slate-500">Sessions attended</div>
+              <div className="mt-1 text-2xl font-semibold text-slate-900 tabular-nums">
+                {totals.sessionsAttended} / {totals.sessionsHeld}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+              <div className="text-xs uppercase tracking-wide text-slate-500">Time attended</div>
+              <div className="mt-1 text-2xl font-semibold text-slate-900">
+                {timePct == null ? "-" : `${timePct}%`}
+              </div>
+              <div className="mt-1 text-xs text-slate-500">
+                {timeTotals.durationKnownMin > 0
+                  ? `${fmtMinutes(timeTotals.attendedMin)} / ${fmtMinutes(timeTotals.durationKnownMin)}`
+                  : "No duration data yet"}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+              <div className="text-xs uppercase tracking-wide text-slate-500">Risk level</div>
+              <div className="mt-2">
+                <span
+                  className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold ${riskBadgeClasses(
+                    riskLevel
+                  )}`}
+                >
+                  {riskLevel}
+                </span>
+              </div>
+              <div className="mt-2 text-xs text-slate-500">
+                High: &lt;70% • Low: ≥70%
+              </div>
+            </div>
+          </div>
+
+          <div className="overflow-auto rounded-2xl border border-slate-200">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-slate-600">
+                <tr className="border-b border-slate-200">
+                  <th className="py-3 px-4 text-left font-medium">Module</th>
+                  <th className="py-3 px-4 text-left font-medium">Name</th>
+                  <th className="py-3 px-4 text-left font-medium">Program</th>
+                  <th className="py-3 px-4 text-left font-medium">Intake</th>
+                  <th className="py-3 px-4 text-left font-medium">Year</th>
+                  <th className="py-3 px-4 text-right font-medium">Attended</th>
+                  <th className="py-3 px-4 text-right font-medium">Scheduled</th>
+                  <th className="py-3 px-4 text-right font-medium">%</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {moduleRows.map((r, idx) => {
+                  const key = cohortKeyString({
+                    moduleCode: r.moduleCode,
+                    intake: r.intake,
+                    year: r.year,
+                  });
+                  const sessionRows = sessionsByCohort.get(key) ?? [];
+
+                  return (
+                    <React.Fragment key={key}>
                       <tr
-                        key={r.studentId}
                         className={`border-b border-slate-100 ${
                           idx % 2 === 0 ? "bg-white" : "bg-slate-50/50"
-                        } hover:bg-slate-50`}
+                        }`}
                       >
-                        <td className="py-3 px-4">
-                          <a
-                            className="font-medium text-slate-900 hover:underline"
-                            href={
-                              buildDashboardUrl({
-                                q,
-                                student: r.studentId,
-                                program: programId,
-                                module: moduleFilter,
-                                intake,
-                                year: year ? String(year) : "",
-                              }) + "#student"
-                            }
-                          >
-                            {r.name ?? "(no name)"}
-                          </a>
+                        <td className="py-3 px-4 font-medium text-slate-900 whitespace-nowrap">
+                          {r.moduleCode}
                         </td>
-                        <td className="py-3 px-4 text-slate-700">{r.email}</td>
+                        <td className="py-3 px-4 text-slate-900">{r.moduleName}</td>
+                        <td className="py-3 px-4 text-slate-700">{r.programsText ?? "-"}</td>
+                        <td className="py-3 px-4 text-slate-700">{r.intake}</td>
+                        <td className="py-3 px-4 text-slate-700 tabular-nums">{r.year}</td>
                         <td className="py-3 px-4 text-right tabular-nums text-slate-900">
                           {r.sessionsAttended}
                         </td>
                         <td className="py-3 px-4 text-right tabular-nums text-slate-700">
-                          {cohortSummary.sessionsHeld}
+                          {r.sessionsHeld}
                         </td>
                         <td className="py-3 px-4 text-right tabular-nums font-medium text-slate-900">
                           {r.attendancePct}%
                         </td>
                       </tr>
-                    ))}
 
-                    {cohortSummary.rows.length === 0 && (
-                      <tr>
-                        <td className="py-4 px-4 text-slate-600" colSpan={5}>
-                          No students enrolled for this cohort (or none with @stu.nexteducationgroup.com).
+                      <tr className="border-b border-slate-200 bg-white">
+                        <td colSpan={8} className="px-4 py-3">
+                          <details className="group rounded-2xl border border-slate-200 bg-white">
+                            <summary className="cursor-pointer px-4 py-3 select-none flex items-center justify-between gap-3 list-none">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium text-slate-900">Sessions</span>
+                                <svg
+                                  viewBox="0 0 20 20"
+                                  fill="currentColor"
+                                  className="h-4 w-4 text-slate-500 transition-transform duration-200 group-open:rotate-180"
+                                  aria-hidden="true"
+                                >
+                                  <path
+                                    fillRule="evenodd"
+                                    d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 10.94l3.71-3.71a.75.75 0 1 1 1.06 1.06l-4.24 4.24a.75.75 0 0 1-1.06 0L5.21 8.29a.75.75 0 0 1 .02-1.08z"
+                                    clipRule="evenodd"
+                                  />
+                                </svg>
+                              </div>
+                              <span className="text-xs text-slate-500">{sessionRows.length} total</span>
+                            </summary>
+
+                            <div className="px-4 pb-4">
+                              <div className="overflow-auto rounded-xl border border-slate-200">
+                                <table className="w-full text-sm">
+                                  <thead className="bg-slate-50 text-slate-600">
+                                    <tr className="border-b border-slate-200">
+                                      <th className="py-3 px-4 text-left font-medium whitespace-nowrap">Date</th>
+                                      <th className="py-3 px-4 text-left font-medium">Meeting title</th>
+                                      <th className="py-3 px-4 text-left font-medium whitespace-nowrap">Status</th>
+                                      <th className="py-3 px-4 text-right font-medium whitespace-nowrap">Scheduled</th>
+                                      <th className="py-3 px-4 text-right font-medium whitespace-nowrap">Attended</th>
+                                      <th className="py-3 px-4 text-right font-medium whitespace-nowrap">% attended</th>
+                                    </tr>
+                                  </thead>
+
+                                  <tbody>
+                                    {sessionRows.map((s, sidx) => (
+                                      <tr
+                                        key={s.id}
+                                        className={`border-b border-slate-100 ${
+                                          sidx % 2 === 0 ? "bg-white" : "bg-slate-50/50"
+                                        } hover:bg-slate-50`}
+                                      >
+                                        <td className="py-3 px-4 whitespace-nowrap text-slate-900">
+                                          {fmtDate(s.startTime)}
+                                        </td>
+
+                                        <td className="py-3 px-4 text-slate-900">
+                                          <div className="max-w-[520px] leading-snug">
+                                            {s.meetingName ?? "-"}
+                                          </div>
+                                        </td>
+
+                                        <td className="py-3 px-4 whitespace-nowrap">
+                                          {s.attended ? (
+                                            <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 ring-1 ring-emerald-200">
+                                              Attended
+                                            </span>
+                                          ) : (
+                                            <span className="inline-flex items-center rounded-full bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700 ring-1 ring-rose-200">
+                                              Absent
+                                            </span>
+                                          )}
+                                        </td>
+
+                                        <td className="py-3 px-4 text-right tabular-nums text-slate-700 whitespace-nowrap">
+                                          {fmtMinutes(s.scheduledDurationMin)}
+                                        </td>
+
+                                        <td className="py-3 px-4 text-right tabular-nums text-slate-700 whitespace-nowrap">
+                                          {s.attended ? fmtMinutes(s.attendedMin) : "-"}
+                                        </td>
+
+                                        <td className="py-3 px-4 text-right tabular-nums text-slate-700 whitespace-nowrap">
+                                          {s.attendedPct == null ? "-" : fmtPct1(s.attendedPct)}
+                                        </td>
+                                      </tr>
+                                    ))}
+
+                                    {sessionRows.length === 0 && (
+                                      <tr>
+                                        <td className="py-4 px-4 text-slate-600" colSpan={6}>
+                                          No sessions found for this cohort yet.
+                                        </td>
+                                      </tr>
+                                    )}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          </details>
                         </td>
                       </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                    </React.Fragment>
+                  );
+                })}
 
-              {cohortSummary.sessionsHeld === 0 && (
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
-                  No sessions imported yet for this cohort. Upload attendance CSVs for this cohort to populate.
-                </div>
-              )}
-            </div>
-          </section>
-        )}
+                {moduleRows.length === 0 && (
+                  <tr>
+                    <td className="py-4 px-4 text-slate-600" colSpan={8}>
+                      No enrollments found for this student (with current filters).
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
 
-        {selected && (
-          <section
-            id="student"
-            className="rounded-2xl border border-slate-200 bg-white shadow-sm scroll-mt-6"
-          >
-            <div className="p-4 md:p-6 space-y-5">
-              <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                <div className="space-y-1 min-w-0">
-                  <h2 className="text-base md:text-lg font-semibold text-slate-900 truncate">
-                    {selected.name ?? "(no name)"}
-                  </h2>
-                  <div className="text-sm text-slate-600 truncate">{selected.email}</div>
-                  {moduleRows.length > 0 && (
-                    <div className="text-sm text-slate-600">
-                      Program:{" "}
-                      <span className="font-medium text-slate-900">
-                        {moduleRows[0].programsText ?? "-"}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                  <div className="text-xs uppercase tracking-wide text-slate-500">Attendance</div>
-                  <div className="mt-1 text-2xl font-semibold text-slate-900">
-                    {pct(totals.sessionsAttended, totals.sessionsHeld)}%
-                  </div>
-                  <div className="mt-1 text-xs text-slate-500">By sessions</div>
-                </div>
-
-                <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                  <div className="text-xs uppercase tracking-wide text-slate-500">Sessions attended</div>
-                  <div className="mt-1 text-2xl font-semibold text-slate-900 tabular-nums">
-                    {totals.sessionsAttended} / {totals.sessionsHeld}
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                  <div className="text-xs uppercase tracking-wide text-slate-500">Time attended</div>
-                  <div className="mt-1 text-2xl font-semibold text-slate-900">
-                    {timePct == null ? "-" : `${timePct}%`}
-                  </div>
-                  <div className="mt-1 text-xs text-slate-500">
-                    {timeTotals.durationKnownMin > 0
-                      ? `${fmtMinutes(timeTotals.attendedMin)} / ${fmtMinutes(timeTotals.durationKnownMin)}`
-                      : "No duration data yet"}
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                  <div className="text-xs uppercase tracking-wide text-slate-500">Risk level</div>
-                  <div className="mt-2">
-                    <span
-                      className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold ${riskBadgeClasses(
-                        riskLevel
-                      )}`}
-                    >
-                      {riskLevel}
-                    </span>
-                  </div>
-                  <div className="mt-2 text-xs text-slate-500">
-                    High: &lt;50% • Low: ≥75%
-                  </div>
-                </div>
-              </div>
-
-              <div className="overflow-auto rounded-2xl border border-slate-200">
-                <table className="w-full text-sm">
-                  <thead className="bg-slate-50 text-slate-600">
-                    <tr className="border-b border-slate-200">
-                      <th className="py-3 px-4 text-left font-medium">Module</th>
-                      <th className="py-3 px-4 text-left font-medium">Name</th>
-                      <th className="py-3 px-4 text-left font-medium">Program</th>
-                      <th className="py-3 px-4 text-left font-medium">Intake</th>
-                      <th className="py-3 px-4 text-left font-medium">Year</th>
-                      <th className="py-3 px-4 text-right font-medium">Attended</th>
-                      <th className="py-3 px-4 text-right font-medium">Scheduled</th>
-                      <th className="py-3 px-4 text-right font-medium">%</th>
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    {moduleRows.map((r, idx) => {
-                      const key = cohortKeyString({
-                        moduleCode: r.moduleCode,
-                        intake: r.intake,
-                        year: r.year,
-                      });
-                      const sessionRows = sessionsByCohort.get(key) ?? [];
-
-                      return (
-                        <React.Fragment key={key}>
-                          <tr
-                            className={`border-b border-slate-100 ${
-                              idx % 2 === 0 ? "bg-white" : "bg-slate-50/50"
-                            }`}
-                          >
-                            <td className="py-3 px-4 font-medium text-slate-900 whitespace-nowrap">
-                              {r.moduleCode}
-                            </td>
-                            <td className="py-3 px-4 text-slate-900">{r.moduleName}</td>
-                            <td className="py-3 px-4 text-slate-700">{r.programsText ?? "-"}</td>
-                            <td className="py-3 px-4 text-slate-700">{r.intake}</td>
-                            <td className="py-3 px-4 text-slate-700 tabular-nums">{r.year}</td>
-                            <td className="py-3 px-4 text-right tabular-nums text-slate-900">
-                              {r.sessionsAttended}
-                            </td>
-                            <td className="py-3 px-4 text-right tabular-nums text-slate-700">
-                              {r.sessionsHeld}
-                            </td>
-                            <td className="py-3 px-4 text-right tabular-nums font-medium text-slate-900">
-                              {r.attendancePct}%
-                            </td>
-                          </tr>
-
-                          <tr className="border-b border-slate-200 bg-white">
-                            <td colSpan={8} className="px-4 py-3">
-                              <details className="group rounded-2xl border border-slate-200 bg-white">
-                                <summary className="cursor-pointer px-4 py-3 select-none flex items-center justify-between gap-3 list-none">
-                                  <div className="flex items-center gap-2">
-                                    <span className="font-medium text-slate-900">Sessions</span>
-                                    <svg
-                                      viewBox="0 0 20 20"
-                                      fill="currentColor"
-                                      className="h-4 w-4 text-slate-500 transition-transform duration-200 group-open:rotate-180"
-                                      aria-hidden="true"
-                                    >
-                                      <path
-                                        fillRule="evenodd"
-                                        d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 10.94l3.71-3.71a.75.75 0 1 1 1.06 1.06l-4.24 4.24a.75.75 0 0 1-1.06 0L5.21 8.29a.75.75 0 0 1 .02-1.08z"
-                                        clipRule="evenodd"
-                                      />
-                                    </svg>
-                                  </div>
-                                  <span className="text-xs text-slate-500">{sessionRows.length} total</span>
-                                </summary>
-
-                                <div className="px-4 pb-4">
-                                  <div className="overflow-auto rounded-xl border border-slate-200">
-                                    <table className="w-full text-sm">
-                                      <thead className="bg-slate-50 text-slate-600">
-                                        <tr className="border-b border-slate-200">
-                                          <th className="py-3 px-4 text-left font-medium whitespace-nowrap">Date</th>
-                                          <th className="py-3 px-4 text-left font-medium">Meeting title</th>
-                                          <th className="py-3 px-4 text-left font-medium whitespace-nowrap">Status</th>
-                                          <th className="py-3 px-4 text-right font-medium whitespace-nowrap">Scheduled</th>
-                                          <th className="py-3 px-4 text-right font-medium whitespace-nowrap">Attended</th>
-                                          <th className="py-3 px-4 text-right font-medium whitespace-nowrap">% attended</th>
-                                        </tr>
-                                      </thead>
-
-                                      <tbody>
-                                        {sessionRows.map((s, sidx) => (
-                                          <tr
-                                            key={s.id}
-                                            className={`border-b border-slate-100 ${
-                                              sidx % 2 === 0 ? "bg-white" : "bg-slate-50/50"
-                                            } hover:bg-slate-50`}
-                                          >
-                                            <td className="py-3 px-4 whitespace-nowrap text-slate-900">
-                                              {fmtDate(s.startTime)}
-                                            </td>
-
-                                            <td className="py-3 px-4 text-slate-900">
-                                              <div className="max-w-[520px] leading-snug">
-                                                {s.meetingName ?? "-"}
-                                              </div>
-                                            </td>
-
-                                            <td className="py-3 px-4 whitespace-nowrap">
-                                              {s.attended ? (
-                                                <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 ring-1 ring-emerald-200">
-                                                  Attended
-                                                </span>
-                                              ) : (
-                                                <span className="inline-flex items-center rounded-full bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700 ring-1 ring-rose-200">
-                                                  Absent
-                                                </span>
-                                              )}
-                                            </td>
-
-                                            <td className="py-3 px-4 text-right tabular-nums text-slate-700 whitespace-nowrap">
-                                              {fmtMinutes(s.scheduledDurationMin)}
-                                            </td>
-
-                                            <td className="py-3 px-4 text-right tabular-nums text-slate-700 whitespace-nowrap">
-                                              {s.attended ? fmtMinutes(s.attendedMin) : "-"}
-                                            </td>
-
-                                            <td className="py-3 px-4 text-right tabular-nums text-slate-700 whitespace-nowrap">
-                                              {s.attendedPct == null ? "-" : fmtPct1(s.attendedPct)}
-                                            </td>
-                                          </tr>
-                                        ))}
-
-                                        {sessionRows.length === 0 && (
-                                          <tr>
-                                            <td className="py-4 px-4 text-slate-600" colSpan={7}>
-                                              No sessions found for this cohort yet.
-                                            </td>
-                                          </tr>
-                                        )}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                </div>
-                              </details>
-                            </td>
-                          </tr>
-                        </React.Fragment>
-                      );
-                    })}
-
-                    {moduleRows.length === 0 && (
-                      <tr>
-                        <td className="py-4 px-4 text-slate-600" colSpan={8}>
-                          No enrollments found for this student (with current filters).
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="text-xs text-slate-500">
-                Note: “Attended” counts only rows where email ends with{" "}
-                <span className="font-semibold">@stu.nexteducationgroup.com</span>.
-              </div>
-            </div>
-          </section>
-        )}
-      </div>
-    </div>
-  );
+          <div className="text-xs text-slate-500">
+            Note: “Attended” counts only rows where email ends with{" "}
+            <span className="font-semibold">@stu.nexteducationgroup.com</span>.
+          </div>
+        </div>
+      </section>
+    )}
+  </AppShell>
+);
 }
