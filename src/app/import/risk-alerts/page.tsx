@@ -41,13 +41,16 @@ function fmtPct(value: number) {
   return `${Math.round(value * 10) / 10}%`;
 }
 
-function fmtDateTimeUtc(d: Date) {
-  const year = d.getUTCFullYear();
-  const month = d.toLocaleString("en-GB", { month: "short", timeZone: "UTC" });
-  const day = String(d.getUTCDate()).padStart(2, "0");
-  const hour = String(d.getUTCHours()).padStart(2, "0");
-  const minute = String(d.getUTCMinutes()).padStart(2, "0");
-  return `${day} ${month} ${year}, ${hour}:${minute}`;
+function fmtDateTimeLocal(d: Date) {
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Colombo",
+  }).format(d);
 }
 
 function clamp(n: number, min: number, max: number) {
@@ -441,7 +444,7 @@ export default async function RiskAlertsPage({
                         </span>
                       </td>
                       <td className="py-3 px-4 text-slate-700 whitespace-nowrap">
-                        {fmtDateTimeUtc(r.createdAt)}
+                        {fmtDateTimeLocal(r.createdAt)}
                       </td>
                     </tr>
                   ))}
