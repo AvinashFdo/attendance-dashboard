@@ -90,7 +90,7 @@ function fmtDateTime(value: string | null) {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-    timeZone: "UTC",
+    timeZone: "Asia/Colombo",
   }).format(d);
 }
 

@@ -38,6 +38,8 @@ type ImportEnrollmentOk = {
 };
 type ImportEnrollmentResponse = ImportEnrollmentOk | ApiErr;
 
+const ATTENDANCE_PREFS_KEY = "attendance-import-prefs";
+
 function safeParseJson<T>(raw: string): T | null {
   try {
     return raw ? (JSON.parse(raw) as T) : null;
@@ -111,8 +113,12 @@ export default function ImportPage() {
   const [modulesLoading, setModulesLoading] = useState(false);
   const [modulesError, setModulesError] = useState<string | null>(null);
 
+  const [selectedIntake, setSelectedIntake] = useState<string>("Summer");
+  const [selectedYear, setSelectedYear] = useState<string>("2026");
   const [selectedProgram, setSelectedProgram] = useState<string>("");
   const [selectedModuleCode, setSelectedModuleCode] = useState<string>("");
+  const [selectedDurationHours, setSelectedDurationHours] = useState<string>("2");
+  const [selectedDurationMinutes, setSelectedDurationMinutes] = useState<string>("0");
 
   const redirectTimerRef = useRef<number | null>(null);
 
@@ -171,6 +177,48 @@ export default function ImportPage() {
     };
   }, []);
 
+  useEffect(() => {
+    const raw = window.localStorage.getItem(ATTENDANCE_PREFS_KEY);
+    const saved = safeParseJson<{
+      intake?: string;
+      year?: string;
+      program?: string;
+      moduleCode?: string;
+      scheduledDurationHours?: string;
+      scheduledDurationMinutes?: string;
+    }>(raw ?? "");
+
+    if (!saved) return;
+
+    setSelectedIntake(saved.intake ?? "Summer");
+    setSelectedYear(saved.year ?? "2026");
+    setSelectedProgram(saved.program ?? "");
+    setSelectedModuleCode(saved.moduleCode ?? "");
+    setSelectedDurationHours(saved.scheduledDurationHours ?? "2");
+    setSelectedDurationMinutes(saved.scheduledDurationMinutes ?? "0");
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      ATTENDANCE_PREFS_KEY,
+      JSON.stringify({
+        intake: selectedIntake,
+        year: selectedYear,
+        program: selectedProgram,
+        moduleCode: selectedModuleCode,
+        scheduledDurationHours: selectedDurationHours,
+        scheduledDurationMinutes: selectedDurationMinutes,
+      })
+    );
+  }, [
+    selectedIntake,
+    selectedYear,
+    selectedProgram,
+    selectedModuleCode,
+    selectedDurationHours,
+    selectedDurationMinutes,
+  ]);
+
   const programOptions = useMemo(() => {
     const set = new Set<string>();
 
@@ -200,8 +248,13 @@ export default function ImportPage() {
   }, [modules, selectedProgram]);
 
   useEffect(() => {
-    setSelectedModuleCode(filteredModules[0]?.code ?? "");
-  }, [filteredModules]);
+    if (!selectedModuleCode) return;
+
+    const stillExists = filteredModules.some((m) => m.code === selectedModuleCode);
+    if (!stillExists) {
+      setSelectedModuleCode("");
+    }
+  }, [filteredModules, selectedModuleCode]);
 
   async function uploadModules(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -424,7 +477,13 @@ export default function ImportPage() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div>
                 <label className={labelClass}>Intake</label>
-                <select name="intake" className={selectClass} defaultValue="Summer" required>
+                <select
+                  name="intake"
+                  className={selectClass}
+                  value={selectedIntake}
+                  onChange={(e) => setSelectedIntake(e.target.value)}
+                  required
+                >
                   <option value="Spring">Spring</option>
                   <option value="Summer">Summer</option>
                   <option value="Autumn">Autumn</option>
@@ -438,7 +497,8 @@ export default function ImportPage() {
                   type="number"
                   min={2020}
                   max={2100}
-                  defaultValue={2026}
+                  value={selectedYear}
+                  onChange={(e) => setSelectedYear(e.target.value)}
                   className={inputClass}
                   required
                 />
@@ -461,7 +521,7 @@ export default function ImportPage() {
                     value={selectedProgram}
                     onChange={(e) => setSelectedProgram(e.target.value)}
                   >
-                    <option value="">All programs</option>
+                    <option value="">Select a program</option>
                     {programOptions.map((p) => (
                       <option key={p} value={p}>
                         {p}
@@ -498,6 +558,7 @@ export default function ImportPage() {
                     onChange={(e) => setSelectedModuleCode(e.target.value)}
                     required
                   >
+                    <option value="">Select a module</option>
                     {filteredModules.map((m) => (
                       <option key={m.code} value={m.code}>
                         {m.code} - {m.name}
@@ -515,7 +576,8 @@ export default function ImportPage() {
                     <select
                       name="scheduledDurationHours"
                       className={selectClass}
-                      defaultValue="2"
+                      value={selectedDurationHours}
+                      onChange={(e) => setSelectedDurationHours(e.target.value)}
                       required
                     >
                       {hourOptions.map((h) => (
@@ -533,7 +595,8 @@ export default function ImportPage() {
                     <select
                       name="scheduledDurationMinutes"
                       className={selectClass}
-                      defaultValue="0"
+                      value={selectedDurationMinutes}
+                      onChange={(e) => setSelectedDurationMinutes(e.target.value)}
                       required
                     >
                       {minuteOptions.map((m) => (
