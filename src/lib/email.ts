@@ -43,12 +43,22 @@ export function buildAttendanceAlertSubject() {
 
 export function buildAttendanceAlertBody(params: {
   studentName: string | null;
+  programName?: string | null;
   moduleName: string;
   sessionCount: number;
   timePct: number;
+  attendedMin: number;
+  totalMin: number;
 }) {
   const name = params.studentName?.trim() || "Student";
   const pct = `${Math.round(params.timePct * 10) / 10}%`;
+
+  const fmt = (min: number) => {
+    const h = Math.floor(min / 60);
+    const m = min % 60;
+    if (m === 0) return `${h}h`;
+    return `${h}h ${m}m`;
+  };
 
   return `
   <p>Dear ${name},</p>
@@ -58,9 +68,13 @@ export function buildAttendanceAlertBody(params: {
   </p>
 
   <p>
+    Program: ${params.programName ?? "-"}<br/>
     Module: ${params.moduleName}<br/>
-    Classes completed: ${params.sessionCount}<br/>
-    Attendance (by time): ${pct}
+  </p>
+
+  <p>
+    Attendance review point: After ${params.sessionCount} recorded sessions<br/>
+    Attendance (by time): ${pct} (${fmt(params.attendedMin)} / ${fmt(params.totalMin)})
   </p>
 
   <p>
@@ -68,19 +82,78 @@ export function buildAttendanceAlertBody(params: {
   </p>
 
   <p>
-    If there are any valid circumstances affecting your attendance, please contact your lecturer or the student support team as soon as possible.
+    If there are any valid circumstances affecting your attendance, please contact your Program Manager as soon as possible.
   </p>
 
   <p>
-    <strong>
-      Please ensure that you attend sessions using your official student email address.
-      Attendance recorded under personal email accounts are not counted.
-    </strong>
+    <strong>Please ensure that you attend sessions using your official student email address. 
+    Attendance recorded under personal email accounts are not counted.</strong>
   </p>
 
   <p>
     Regards,<br/>
-    Attendance Monitoring
+    Attendance Monitoring<br/>
+    NEXT Education Group
+  </p>
+  `;
+}
+
+export function buildManagerConsecutiveAbsenceSubject(){
+  return "Attendance Alert: Absent for 2 consecutive classes";
+}
+
+export function buildManagerConsecutiveAbsenceBody(params: {
+  studentName: string | null;
+  studentEmail: string;
+  moduleName: string;
+  moduleCode: string;
+  intake: string;
+  year: number;
+  programName?: string | null;
+  firstMissedDate: Date | null;
+  secondMissedDate: Date | null;
+}) {
+  const name = params.studentName?.trim() || "Student";
+
+  const formatDate = (d: Date | null) =>
+    d
+      ? new Intl.DateTimeFormat("en-GB", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+          timeZone: "Asia/Colombo",
+        }).format(d)
+      : "-";
+
+  return `
+  <p>Dear Program Manager,</p>
+
+  <p>
+    The student listed below has been absent for two consecutive sessions.
+  </p>
+
+  <p>
+    Name: ${name}<br/>
+    Email: ${params.studentEmail}
+  </p>
+
+  <p>
+    Program: ${params.programName ?? "-"}<br/>
+    Module: ${params.moduleName} – ${params.intake} ${params.year}
+  </p>
+
+  <p>
+    Missed sessions: ${formatDate(params.firstMissedDate)} and ${formatDate(params.secondMissedDate)}
+  </p>
+
+  <p>
+    Please follow up accordingly.
+  </p>
+
+  <p>
+    Regards,<br/>
+    Attendance Monitoring<br/>
+    NEXT Education Group
   </p>
   `;
 }

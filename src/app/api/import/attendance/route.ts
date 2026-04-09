@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import {
   buildAttendanceAlertBody,
   buildAttendanceAlertSubject,
+  buildManagerConsecutiveAbsenceBody,
+  buildManagerConsecutiveAbsenceSubject,
   sendEmail,
 } from "@/lib/email";
 
@@ -329,6 +331,8 @@ export async function POST(req: Request) {
     let highRiskCount = 0;
     let alertsCreated = 0;
     let alertsAlreadyExisting = 0;
+    let managerAlertsCreated = 0;
+    let managerAlertsAlreadyExisting = 0;
     let emailDisabledCount = 0;
     let emailTestModeCount = 0;
     let emailSentCount = 0;
@@ -338,6 +342,7 @@ export async function POST(req: Request) {
       where: { moduleCode, intake, year },
       select: {
         id: true,
+        startTime: true,
         scheduledDurationMin: true,
         durationMin: true,
         attendance: {
@@ -354,49 +359,65 @@ export async function POST(req: Request) {
 
     sessionCountForCohort = sessions.length;
 
-    const alertCheckpoints = new Set([5, 8]);
+    const studentAlertCheckpoints = new Set([3, 6, 9]);
 
-    if (alertCheckpoints.has(sessionCountForCohort)) {
-      riskEvaluationRun = true;
-
-      const moduleRecord = await prisma.module.findUnique({
-        where: { code: moduleCode },
-        select: { name: true },
-      });
-
-      const moduleName = moduleRecord?.name ?? moduleCode;
-
-      const enrollments = await prisma.enrollment.findMany({
-        where: {
-          moduleCode,
-          intake,
-          year,
-          student: {
-            email: { endsWith: "@stu.nexteducationgroup.com", mode: "insensitive" },
-          },
-        },
-        select: {
-          studentId: true,
-          student: {
-            select: {
-              name: true,
-              email: true,
+    const moduleRecord = await prisma.module.findUnique({
+      where: { code: moduleCode },
+      select: {
+        name: true,
+        programs: {
+          select: {
+            program: {
+              select: { name: true },
             },
           },
         },
-      });
+      },
+    });
 
-      const enrolledStudentIds = enrollments.map((e) => e.studentId);
+    const moduleName = moduleRecord?.name ?? moduleCode;
+    const programName =
+      moduleRecord?.programs
+        ?.map((x) => x.program.name)
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b))
+        .join(", ") || null;
 
-      const totalScheduledMin = sessions.reduce((sum, s) => {
-        const dur =
-          typeof s.scheduledDurationMin === "number" && s.scheduledDurationMin > 0
-            ? s.scheduledDurationMin
-            : typeof s.durationMin === "number" && s.durationMin > 0
-            ? s.durationMin
-            : 0;
-        return sum + dur;
-      }, 0);
+    const enrollments = await prisma.enrollment.findMany({
+      where: {
+        moduleCode,
+        intake,
+        year,
+        student: {
+          email: { endsWith: "@stu.nexteducationgroup.com", mode: "insensitive" },
+        },
+      },
+      select: {
+        studentId: true,
+        student: {
+          select: {
+            name: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    const enrolledStudentIds = enrollments.map((e) => e.studentId);
+
+    const totalScheduledMin = sessions.reduce((sum, s) => {
+      const dur =
+        typeof s.scheduledDurationMin === "number" && s.scheduledDurationMin > 0
+          ? s.scheduledDurationMin
+          : typeof s.durationMin === "number" && s.durationMin > 0
+          ? s.durationMin
+          : 0;
+      return sum + dur;
+    }, 0);
+
+    // ---------- 3A) Student threshold alerts at 3 / 6 / 9 ----------
+    if (studentAlertCheckpoints.has(sessionCountForCohort)) {
+      riskEvaluationRun = true;
 
       if (enrolledStudentIds.length > 0 && totalScheduledMin > 0) {
         const attendedMap = new Map<string, number>();
@@ -431,15 +452,14 @@ export async function POST(req: Request) {
           if (timePct < 70) {
             highRiskCount++;
 
-            const existing = await prisma.riskAlert.findUnique({
+            const existing = await prisma.riskAlert.findFirst({
               where: {
-                riskalert_unique_per_threshold: {
-                  studentId: e.studentId,
-                  moduleCode,
-                  intake,
-                  year,
-                  sessionCount: sessionCountForCohort,
-                },
+                studentId: e.studentId,
+                moduleCode,
+                intake,
+                year,
+                alertType: "student_threshold",
+                milestone: sessionCountForCohort,
               },
             });
 
@@ -454,6 +474,8 @@ export async function POST(req: Request) {
                 moduleCode,
                 intake,
                 year,
+                alertType: "student_threshold",
+                milestone: sessionCountForCohort,
                 sessionCount: sessionCountForCohort,
                 timePct,
                 status: "pending",
@@ -466,9 +488,12 @@ export async function POST(req: Request) {
 
             const text = buildAttendanceAlertBody({
               studentName: e.student.name,
+              programName,
               moduleName,
               sessionCount: sessionCountForCohort,
               timePct,
+              attendedMin,
+              totalMin: totalScheduledMin,
             });
 
             const emailResult = await sendEmail({
@@ -500,6 +525,7 @@ export async function POST(req: Request) {
             } else {
               emailFailedCount++;
               console.error("[email-send-failed]", {
+                type: "student_threshold",
                 studentEmail: e.student.email,
                 moduleCode,
                 intake,
@@ -513,6 +539,132 @@ export async function POST(req: Request) {
                 data: { status: "failed" },
               });
             }
+          }
+        }
+      }
+    }
+
+    // ---------- 3B) Program manager alert: 2 consecutive absences ----------
+    const managerEmail = (process.env.PROGRAM_MANAGER_EMAIL ?? "").trim();
+
+    if (managerEmail && sessions.length >= 2 && enrollments.length > 0) {
+      for (const e of enrollments) {
+        let prevAbsent: { id: string; date: Date | null } | null = null;
+
+        for (const s of sessions) {
+          const dur =
+            typeof s.scheduledDurationMin === "number" && s.scheduledDurationMin > 0
+              ? s.scheduledDurationMin
+              : typeof s.durationMin === "number" && s.durationMin > 0
+              ? s.durationMin
+              : 0;
+
+          const a = s.attendance.find((x) => x.studentId === e.studentId);
+
+          const counted =
+            typeof a?.countedMinutes === "number"
+              ? a.countedMinutes
+              : typeof a?.minutes === "number"
+              ? a.minutes
+              : 0;
+
+          const attended = a != null && Math.max(0, Math.min(counted, dur)) > 0;
+
+          if (!attended) {
+            if (prevAbsent) {
+              const existing = await prisma.riskAlert.findFirst({
+                where: {
+                  studentId: e.studentId,
+                  moduleCode,
+                  intake,
+                  year,
+                  alertType: "manager_consecutive_absence",
+                  triggerSessionId: s.id,
+                },
+              });
+
+              if (existing) {
+                managerAlertsAlreadyExisting++;
+              } else {
+                const createdAlert = await prisma.riskAlert.create({
+                  data: {
+                    studentId: e.studentId,
+                    moduleCode,
+                    intake,
+                    year,
+                    alertType: "manager_consecutive_absence",
+                    triggerSessionId: s.id,
+                    sessionCount: sessionCountForCohort,
+                    status: "pending",
+                  },
+                });
+
+                managerAlertsCreated++;
+
+                const subject = buildManagerConsecutiveAbsenceSubject();
+
+                const text = buildManagerConsecutiveAbsenceBody({
+                  studentName: e.student.name,
+                  studentEmail: e.student.email,
+                  programName,
+                  moduleName,
+                  moduleCode,
+                  intake,
+                  year,
+                  firstMissedDate: prevAbsent.date,
+                  secondMissedDate: s.startTime ?? null,
+                });
+
+                const emailResult = await sendEmail({
+                  to: managerEmail,
+                  subject,
+                  text,
+                });
+
+                if (emailResult.ok) {
+                  if (emailResult.status === "disabled") {
+                    emailDisabledCount++;
+                    await prisma.riskAlert.update({
+                      where: { id: createdAlert.id },
+                      data: { status: "disabled" },
+                    });
+                  } else if (emailResult.status === "test_mode") {
+                    emailTestModeCount++;
+                    await prisma.riskAlert.update({
+                      where: { id: createdAlert.id },
+                      data: { status: "test_mode" },
+                    });
+                  } else if (emailResult.status === "sent") {
+                    emailSentCount++;
+                    await prisma.riskAlert.update({
+                      where: { id: createdAlert.id },
+                      data: { status: "sent" },
+                    });
+                  }
+                } else {
+                  emailFailedCount++;
+                  console.error("[email-send-failed]", {
+                    type: "manager_consecutive_absence",
+                    managerEmail,
+                    studentEmail: e.student.email,
+                    moduleCode,
+                    intake,
+                    year,
+                    triggerSessionId: s.id,
+                    error: emailResult.error,
+                  });
+
+                  await prisma.riskAlert.update({
+                    where: { id: createdAlert.id },
+                    data: { status: "failed" },
+                  });
+                }
+              }
+            }
+
+            prevAbsent = { id: s.id, date: s.startTime ?? null };
+          } else {
+            prevAbsent = null;
           }
         }
       }
@@ -532,12 +684,16 @@ export async function POST(req: Request) {
       cappedCount,
       sourceUsed: "section2_only",
 
-      // Risk evaluation summary
+      // Student threshold summary
       riskEvaluationRun,
       sessionCountForCohort,
       highRiskCount,
       alertsCreated,
       alertsAlreadyExisting,
+
+      // Manager consecutive-absence summary
+      managerAlertsCreated,
+      managerAlertsAlreadyExisting,
 
       // Email summary
       emailSending: "dev_safe",

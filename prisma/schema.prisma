@@ -114,16 +114,20 @@ model RiskAlert {
   intake     String
   year       Int
 
-  sessionCount Int
-  timePct     Float
-  status      String   @default("pending") // pending, skipped_dev, sent, failed
+  alertType  String   @default("student_threshold") // "student_threshold" | "manager_consecutive_absence"
+  milestone  Int?
+  status     String   @default("pending")
 
-  createdAt  DateTime @default(now())
-  uupdatedAt DateTime? @updatedAt
+  sessionCount Int?
+  timePct     Float?
+
+  triggerSessionId String?
+
+  createdAt DateTime @default(now())
+  updatedAt  DateTime @default(now()) @updatedAt
 
   student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
-  @@index([moduleCode, intake, year])
-  @@index([studentId])
-  @@unique([studentId, moduleCode, intake, year, sessionCount], name: "riskalert_unique_per_threshold")
+  @@unique([studentId, moduleCode, intake, year, alertType, milestone])
+  @@unique([studentId, moduleCode, intake, year, alertType, triggerSessionId])
 }
